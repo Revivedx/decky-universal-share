@@ -1,0 +1,108 @@
+// Uploads the already-built plugin (dist/, plugin.json, main.py, py_modules/,
+// package.json) to the Decky Loader plugins folder on the Steam Deck via
+// SFTP/SSH, and restarts the plugin_loader service so it goes live.
+//
+// Reads credentials from /settings.json at the project root (deckIP,
+// deckPort, deckUser, deckPass). That file is NOT committed to the repo
+// (see .gitignore).
+
+import { NodeSSH } from "node-ssh";
+import { readFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+
+function loadJSON(relPath) {
+  return JSON.parse(readFileSync(path.join(rootDir, relPath), "utf-8"));
+}
+
+const settings = loadJSON("settings.json");
+const pluginMeta = loadJSON("plugin.json");
+
+const {
+  deckIP,
+  deckPort = "22",
+  deckUser,
+  deckPass,
+  deckDir = "/home/deck",
+} = settings;
+
+const pluginName = pluginMeta.name;
+const remotePluginDir = `${deckDir}/homebrew/plugins/${pluginName}`;
+
+// Local files/folders that make up the installable plugin.
+const itemsToUpload = [
+  { local: "dist", remote: "dist", type: "dir" },
+  { local: "plugin.json", remote: "plugin.json", type: "file" },
+  { local: "main.py", remote: "main.py", type: "file" },
+  { local: "package.json", remote: "package.json", type: "file" },
+];
+if (existsSync(path.join(rootDir, "py_modules"))) {
+  itemsToUpload.push({ local: "py_modules", remote: "py_modules", type: "dir" });
+}
+
+async function main() {
+  if (!deckIP || !deckUser || !deckPass) {
+    throw new Error(
+      "Incomplete settings.json: deckIP, deckUser and deckPass are required."
+    );
+  }
+
+  const ssh = new NodeSSH();
+  console.log(`Connecting to ${deckUser}@${deckIP}:${deckPort}...`);
+  await ssh.connect({
+    host: deckIP,
+    port: Number(deckPort),
+    username: deckUser,
+    password: deckPass,
+  });
+
+  // The service is stopped before uploading: uploading while Decky is
+  // running makes its file-watcher fire a hot-reload for every individual
+  // file (one for dist/, plugin.json, main.py...), and a `systemctl restart`
+  // in the middle of that churn can leave a plugin process orphaned mid-
+  // reload (happened to us once: an orphan like that ended up using 12GB of RAM).
+  console.log("Stopping plugin_loader...");
+  await runSudo(ssh, deckPass, "systemctl stop plugin_loader");
+
+  // The plugins folder is owned by root; grant ourselves permission before writing.
+  await runSudo(ssh, deckPass, `mkdir -p "${remotePluginDir}"`);
+  await runSudo(ssh, deckPass, `chown -R ${deckUser}:${deckUser} "${remotePluginDir}"`);
+
+  console.log(`Uploading files to ${remotePluginDir} ...`);
+  for (const item of itemsToUpload) {
+    const localPath = path.join(rootDir, item.local);
+    if (!existsSync(localPath)) {
+      console.warn(`  skipped (missing): ${item.local}`);
+      continue;
+    }
+    if (item.type === "dir") {
+      await ssh.putDirectory(localPath, `${remotePluginDir}/${item.remote}`, {
+        recursive: true,
+        concurrency: 4,
+      });
+    } else {
+      await ssh.putFile(localPath, `${remotePluginDir}/${item.remote}`);
+    }
+    console.log(`  ✔ ${item.local}`);
+  }
+
+  console.log("Starting plugin_loader...");
+  await runSudo(ssh, deckPass, "systemctl start plugin_loader");
+
+  ssh.dispose();
+  console.log("Deploy complete.");
+}
+
+async function runSudo(ssh, password, command) {
+  const result = await ssh.execCommand(`echo '${password}' | sudo -S ${command}`);
+  if (result.code !== 0) {
+    throw new Error(`Remote command failed "${command}":\n${result.stderr}`);
+  }
+}
+
+main().catch((err) => {
+  console.error(err.message ?? err);
+  process.exit(1);
+});
