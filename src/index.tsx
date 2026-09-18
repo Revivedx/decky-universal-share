@@ -7,7 +7,6 @@ import {
   Navigation,
   PanelSection,
   PanelSectionRow,
-  Router,
   showModal,
   SliderField,
   staticClasses,
@@ -258,7 +257,57 @@ async function shareToSteamAccount(item: ScreenshotItem, privacy: number): Promi
   }
 }
 
-async function shareToSteamFriend(item: ScreenshotItem, friend: SteamFriend): Promise<void> {
+// Gamepad B button, as reported by SteamClient.Input (ControllerInputGamepadButton.GAMEPAD_BUTTON_B).
+const GAMEPAD_BUTTON_B = 1;
+
+// While the screenshot is staged in the chat, B means "cancel": close that
+// chat tab and hand control back (to the friend picker). B only does this
+// while the chat tab is still open AND the screenshot is still waiting to be
+// sent; once it's sent, the chat closed, or a few minutes pass, the watcher
+// removes itself, so a later B press elsewhere is never hijacked.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function watchStagedChatForCancel(app: any, context: any, chat: any, view: any, onCancel: () => void): void {
+  const uiStore = app.UIStore;
+  const startedAt = Date.now();
+  let sawFile = false;
+  let finished = false;
+  let registration: { unregister: () => void } | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  const isChatOpen = () => !!uiStore.GetTabSetByUniqueID(uiStore.GetPerContextChatData(context), chat.unique_id);
+  // The file is picked up asynchronously, so just after staging it may not be visible yet.
+  const isStaged = () => {
+    const staged = view.m_fileUploadManager?.file;
+    if (staged) sawFile = true;
+    return !!staged || (!sawFile && Date.now() - startedAt < 5000);
+  };
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (timer) clearInterval(timer);
+    registration?.unregister();
+  };
+
+  timer = setInterval(() => {
+    if (!isChatOpen() || !isStaged() || Date.now() - startedAt > 10 * 60 * 1000) finish();
+  }, 500);
+
+  registration = SteamClient.Input.RegisterForControllerInputMessages((_controllerIndex, button, pressed) => {
+    if (finished || !pressed || (button as number) !== GAMEPAD_BUTTON_B) return;
+    if (!isChatOpen() || !isStaged()) {
+      finish();
+      return;
+    }
+    finish();
+    uiStore.CloseTabByID(chat.unique_id);
+    onCancel();
+  });
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// `onCancel` runs if the user backs out (B) from the chat with the
+// screenshot still unsent; it's used to reopen the friend picker.
+async function shareToSteamFriend(item: ScreenshotItem, friend: SteamFriend, onCancel: () => void): Promise<void> {
   try {
     /* eslint-disable @typescript-eslint/no-explicit-any */
     const app = (window as any).g_FriendsUIApp;
@@ -276,13 +325,19 @@ async function shareToSteamFriend(item: ScreenshotItem, friend: SteamFriend): Pr
     // The app id Steam files the image under; it's the folder name in .../remote/<appid>/screenshots/.
     const appId = Number(/remote[\\/](\d+)[\\/]screenshots/.exec(item.path)?.[1] ?? 0);
 
-    const ownerWindow = Router.WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow ?? window;
-    let view = app.UIStore.ShowAndOrActivateChat(ownerWindow, chat, true);
+    // The first argument of ShowAndOrActivateChat is Steam's own browser
+    // context object (pid + UI mode), NOT a DOM window. Passing anything else
+    // makes Steam create a stray chat context that floats over everything and
+    // never gets the controller's focus, so use the one Steam registered.
+    const context = app.GetDefaultBrowserContext?.() ?? app.UIStore.GetAllBrowserContexts?.()[0];
+    if (!context) throw new Error("no Steam chat context");
+    let view = app.UIStore.ShowAndOrActivateChat(context, chat, true);
     if (typeof view?.GetChatView === "function") view = view.GetChatView();
     if (typeof view?.SetFileToUpload !== "function") throw new Error("the chat can't take a file");
     view.SetFileToUpload(file, { unAssociatedAppID: appId });
 
-    toaster.toast({ title: `Chat with ${friend.name} is open`, body: "Confirm the screenshot there to send it." });
+    watchStagedChatForCancel(app, context, chat, view, onCancel);
+    toaster.toast({ title: `Chat with ${friend.name} is open`, body: "Confirm the screenshot there to send it, or press B to go back." });
   } catch (e) {
     console.error("Omni-Revi-Transfer: staging the screenshot in Steam chat failed", e);
     // Fall back to just opening the chat, so the user can attach it by hand.
@@ -849,6 +904,19 @@ function FriendPickerModal({ onPick, onClose }: { onPick: (friend: SteamFriend) 
   );
 }
 
+function openSteamFriendPicker(item: ScreenshotItem) {
+  const modal = showModal(
+    <FriendPickerModal
+      onPick={(friend) => {
+        modal.Close();
+        // If the user backs out of the chat with B, come back to this picker.
+        shareToSteamFriend(item, friend, () => openSteamFriendPicker(item));
+      }}
+      onClose={() => modal.Close()}
+    />
+  );
+}
+
 // Important: OK and Cancel (the controller's B button always fires Cancel)
 // only close the preview, with no destructive actions — "Delete" used to
 // live in the Cancel slot and B would delete the screenshot by accident.
@@ -917,15 +985,7 @@ function PreviewModalContent({
       return;
     }
     if (option.data === "steamfriend") {
-      const modal = showModal(
-        <FriendPickerModal
-          onPick={(friend) => {
-            modal.Close();
-            shareToSteamFriend(item, friend);
-          }}
-          onClose={() => modal.Close()}
-        />
-      );
+      openSteamFriendPicker(item);
       return;
     }
     if (option.data === "discord") {
