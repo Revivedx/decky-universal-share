@@ -47,6 +47,9 @@ interface Settings {
   auto_upload_discord: boolean;
   auto_upload_delay_google_drive: number;
   auto_upload_delay_discord: number;
+  auto_upload_steam: boolean;
+  auto_upload_delay_steam: number;
+  steam_upload_privacy: number;
   used_mb: number;
   over_limit: boolean;
   account_detected: boolean;
@@ -117,6 +120,165 @@ const pollDiscordLink = callable<[], DiscordLinkPoll>("poll_discord_link");
 const cancelDiscordLink = callable<[], void>("cancel_discord_link");
 const unlinkDiscord = callable<[], void>("unlink_discord");
 const uploadScreenshotToDiscord = callable<[path: string], DiscordUploadResult>("upload_screenshot_to_discord");
+
+// --- Steam sharing ---------------------------------------------------------
+//
+// Unlike Google Drive / Discord, these run in the frontend: uploading a
+// screenshot to the user's Steam account and messaging a friend are things
+// Steam's own client does, reachable only through SteamClient / Steam's
+// internal stores, not from our Python backend.
+//
+// - Account upload: SteamClient.Screenshots.UploadLocalScreenshot (typed and
+//   part of the client API decky plugins commonly use).
+// - Friend message: the screenshot is uploaded, then its community link is
+//   sent through Steam's internal chat store (window.g_FriendsUIApp). That
+//   store is NOT a documented API, so it can change with any Steam update;
+//   every use is feature-checked and wrapped so a change degrades to an
+//   error toast instead of breaking the plugin.
+
+// Steam's EUCMFilePrivacyState values.
+const STEAM_PRIVACY_PRIVATE = 2;
+const STEAM_PRIVACY_FRIENDS_ONLY = 4;
+
+const STEAM_PRIVACY_OPTIONS = [
+  { data: 2, label: "Private (only you)" },
+  { data: 4, label: "Friends only" },
+  { data: 16, label: "Unlisted (anyone with the link)" },
+  { data: 8, label: "Public" },
+];
+
+const STEAM_SHARE_AVAILABLE =
+  typeof SteamClient !== "undefined" && typeof SteamClient.Screenshots?.UploadLocalScreenshot === "function";
+
+// Steam's screenshot record has more fields than @decky/ui's typings list.
+interface SteamScreenshotInfo {
+  nAppID: number;
+  hHandle: number;
+  ePrivacy: number;
+  bUploaded: boolean;
+  strUrl: string;
+  publishedFileID?: string;
+}
+
+interface SteamFriend {
+  accountid: number;
+  name: string;
+}
+
+interface SteamUploadOutcome {
+  ok: boolean;
+  fileId?: string;
+  privacy?: number;
+  alreadyUploaded?: boolean;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const isRealFileId = (id?: string): id is string => !!id && id !== "0";
+const steamFileUrl = (fileId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${fileId}`;
+
+async function listSteamScreenshots(): Promise<SteamScreenshotInfo[]> {
+  return (await SteamClient.Screenshots.GetAllAppsLocalScreenshots()) as unknown as SteamScreenshotInfo[];
+}
+
+// Steam identifies screenshots by (appid, handle); our gallery only has the
+// file name, which Steam's own record ends with ("screenshots/<app>/screenshots/<file>").
+async function findSteamScreenshotByFilename(filename: string): Promise<SteamScreenshotInfo | undefined> {
+  return (await listSteamScreenshots()).find((s) => s.strUrl.endsWith("/" + filename));
+}
+
+async function uploadSteamScreenshot(shot: SteamScreenshotInfo, privacy: number): Promise<SteamUploadOutcome> {
+  if (shot.bUploaded && isRealFileId(shot.publishedFileID)) {
+    return { ok: true, fileId: shot.publishedFileID, privacy: shot.ePrivacy, alreadyUploaded: true };
+  }
+  const accepted = await SteamClient.Screenshots.UploadLocalScreenshot(String(shot.nAppID), shot.hHandle, privacy);
+  if (!accepted) return { ok: false };
+  // Steam finishes the upload in the background; wait (up to ~10 s) for the published id to appear.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const fresh = (await listSteamScreenshots()).find((s) => s.nAppID === shot.nAppID && s.hHandle === shot.hHandle);
+    if (fresh && fresh.bUploaded && isRealFileId(fresh.publishedFileID)) {
+      return { ok: true, fileId: fresh.publishedFileID, privacy: fresh.ePrivacy };
+    }
+    await sleep(500);
+  }
+  return { ok: true };
+}
+
+function listSteamFriends(): SteamFriend[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const all: any[] = (window as any).friendStore?.allFriends ?? [];
+  return all
+    .filter((f) => f.is_friend)
+    .map((f) => ({ accountid: f.accountid as number, name: String(f.display_name ?? f.accountid) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function sendSteamChatMessage(accountid: number, text: string): Promise<boolean> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const chat = (window as any).g_FriendsUIApp?.ChatStore?.GetFriendChat(accountid);
+    if (!chat || typeof chat.SendChatMessage !== "function") return false;
+    await chat.SendChatMessage(text);
+    return true;
+  } catch (e) {
+    console.error("Omni-Revi-Transfer: sending the Steam chat message failed", e);
+    return false;
+  }
+}
+
+// Chat messages are parsed as BBCode, so brackets in a game name would be
+// read as tags.
+const chatSafe = (text: string) => text.replace(/[[\]]/g, "");
+
+// Uploads to the user's account, then reports the outcome with a toast.
+// Returns the outcome so callers (the friend flow) can reuse the file id.
+async function shareToSteamAccount(item: ScreenshotItem, privacy: number): Promise<SteamUploadOutcome> {
+  try {
+    const shot = await findSteamScreenshotByFilename(item.filename);
+    if (!shot) {
+      toaster.toast({ title: "Steam can't find this screenshot", body: "Steam may not have indexed it yet. Try again in a moment." });
+      return { ok: false };
+    }
+    toaster.toast({ title: "Uploading to Steam...", body: item.filename });
+    const outcome = await uploadSteamScreenshot(shot, privacy);
+    if (!outcome.ok) {
+      toaster.toast({ title: "Steam upload failed", body: "Steam didn't accept the upload." });
+    } else if (outcome.alreadyUploaded) {
+      toaster.toast({ title: "Already on your Steam account", body: item.filename });
+    } else {
+      toaster.toast({ title: "Uploaded to your Steam account", body: item.filename });
+    }
+    return outcome;
+  } catch (e) {
+    console.error("Omni-Revi-Transfer: Steam upload failed", e);
+    toaster.toast({ title: "Steam upload failed", body: "Check the console for details." });
+    return { ok: false };
+  }
+}
+
+async function shareToSteamFriend(item: ScreenshotItem, friend: SteamFriend): Promise<void> {
+  const outcome = await shareToSteamAccount(item, STEAM_PRIVACY_FRIENDS_ONLY);
+  if (!outcome.ok) return;
+  if (!isRealFileId(outcome.fileId)) {
+    toaster.toast({ title: "Couldn't get the Steam link", body: "The upload went through but Steam gave no link to send." });
+    return;
+  }
+  if (outcome.privacy === STEAM_PRIVACY_PRIVATE) {
+    toaster.toast({
+      title: "That screenshot is Private on Steam",
+      body: "Your friend couldn't open it. Change its privacy in Steam first.",
+    });
+    return;
+  }
+  const sent = await sendSteamChatMessage(
+    friend.accountid,
+    `${chatSafe(item.appName)} screenshot: ${steamFileUrl(outcome.fileId)}`
+  );
+  toaster.toast(
+    sent
+      ? { title: `Sent to ${friend.name}`, body: "The screenshot link is in your Steam chat." }
+      : { title: "Couldn't message your friend", body: "Steam's chat isn't reachable from the plugin." }
+  );
+}
 
 const PAGE_SIZE = 5;
 
@@ -201,6 +363,12 @@ const PIP_CONTENT_HEIGHT = "30vh";
 
 const SHARE_METHOD_OPTIONS = [
   { data: "qr", label: "QR Code" },
+  ...(STEAM_SHARE_AVAILABLE
+    ? [
+        { data: "steam", label: "Steam (my account)" },
+        { data: "steamfriend", label: "Steam friend (chat)" },
+      ]
+    : []),
   ...(GOOGLE_DRIVE_ENABLED ? [{ data: "googledrive", label: "Google Drive" }] : []),
   ...(DISCORD_ENABLED ? [{ data: "discord", label: "Discord" }] : []),
 ];
@@ -619,6 +787,45 @@ function openDiscordConfirmModal(onLinked: () => void) {
   );
 }
 
+const FRIEND_PICKER_MAX_SHOWN = 8;
+
+// Steam accounts can have hundreds of friends, so instead of a huge
+// dropdown this filters by name and shows only the first few matches.
+function FriendPickerModal({ onPick, onClose }: { onPick: (friend: SteamFriend) => void; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const friends = useMemo(() => listSteamFriends(), []);
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? friends.filter((f) => f.name.toLowerCase().includes(q)) : friends;
+  }, [friends, query]);
+
+  return (
+    <ModalRoot onCancel={onClose} closeModal={onClose} bHideCloseIcon={false}>
+      <div style={{ minHeight: PIP_CONTENT_HEIGHT, display: "flex", flexDirection: "column" }}>
+        <div style={{ fontWeight: 600, marginBottom: "4px" }}>Send to a Steam friend</div>
+        <div style={{ fontSize: "0.75em", opacity: 0.8, marginBottom: "8px" }}>
+          The screenshot is uploaded to your Steam account as Friends only, and its link is sent to
+          them in Steam chat.
+        </div>
+        <TextField value={query} onChange={(e) => setQuery(e.target.value)} />
+        {friends.length === 0 && (
+          <div style={{ marginTop: "8px" }}>No friends found. Steam's friends list may not be loaded yet.</div>
+        )}
+        {matches.slice(0, FRIEND_PICKER_MAX_SHOWN).map((friend) => (
+          <ButtonItem key={friend.accountid} layout="below" onClick={() => onPick(friend)}>
+            {friend.name}
+          </ButtonItem>
+        ))}
+        {matches.length > FRIEND_PICKER_MAX_SHOWN && (
+          <div style={{ fontSize: "0.7em", opacity: 0.6, marginTop: "4px" }}>
+            Showing {FRIEND_PICKER_MAX_SHOWN} of {matches.length}. Type to narrow it down.
+          </div>
+        )}
+      </div>
+    </ModalRoot>
+  );
+}
+
 // Important: OK and Cancel (the controller's B button always fires Cancel)
 // only close the preview, with no destructive actions — "Delete" used to
 // live in the Cancel slot and B would delete the screenshot by accident.
@@ -679,6 +886,23 @@ function PreviewModalContent({
       } else {
         toaster.toast({ title: "Upload failed", body: "Check the plugin log for details." });
       }
+      return;
+    }
+    if (option.data === "steam") {
+      const settings = await getSettings();
+      await shareToSteamAccount(item, settings.steam_upload_privacy);
+      return;
+    }
+    if (option.data === "steamfriend") {
+      const modal = showModal(
+        <FriendPickerModal
+          onPick={(friend) => {
+            modal.Close();
+            shareToSteamFriend(item, friend);
+          }}
+          onClose={() => modal.Close()}
+        />
+      );
       return;
     }
     if (option.data === "discord") {
@@ -1065,6 +1289,7 @@ function ShareOptionsPanel() {
   const [expanded, setExpanded] = useState(false);
   const [driveOpen, setDriveOpen] = useState(false);
   const [discordOpen, setDiscordOpen] = useState(false);
+  const [steamOpen, setSteamOpen] = useState(false);
   const [settings, setLocalSettings] = useState<Settings | undefined>();
   const [driveLinked, setDriveLinked] = useState<boolean | undefined>();
   const [unlinking, setUnlinking] = useState(false);
@@ -1142,6 +1367,45 @@ function ShareOptionsPanel() {
               onChange={(option) => update({ qr_share_duration_seconds: option.data })}
             />
           </PanelSectionRow>
+        </>
+      )}
+
+      {expanded && STEAM_SHARE_AVAILABLE && (
+        <>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => setSteamOpen((o) => !o)}>
+              Steam {steamOpen ? "▲" : "▼"}
+            </ButtonItem>
+          </PanelSectionRow>
+
+          {steamOpen && settings && (
+            <>
+              <PanelSectionRow>
+                <DropdownItem
+                  label="Upload privacy"
+                  description="Who can see screenshots uploaded to your Steam account, manually or automatically. Sending to a friend always uses Friends only."
+                  rgOptions={STEAM_PRIVACY_OPTIONS}
+                  selectedOption={settings.steam_upload_privacy}
+                  onChange={(option) => update({ steam_upload_privacy: option.data })}
+                />
+              </PanelSectionRow>
+              <AutoUploadOptions
+                label="Auto-upload to Steam"
+                description="Uploads each new screenshot to your Steam account without asking, with the privacy above. It counts against your Steam Cloud space."
+                enabled={settings.auto_upload_steam}
+                delaySeconds={settings.auto_upload_delay_steam}
+                onEnabledChange={(value) => update({ auto_upload_steam: value })}
+                onDelayChange={(seconds) => update({ auto_upload_delay_steam: seconds })}
+              />
+              {settings.auto_upload_steam && settings.steam_upload_privacy === 8 && (
+                <PanelSectionRow>
+                  <div style={{ color: "#f5a623", fontSize: "0.75em" }}>
+                    Privacy is Public: every auto-uploaded screenshot will be visible to everyone on your profile.
+                  </div>
+                </PanelSectionRow>
+              )}
+            </>
+          )}
         </>
       )}
 
@@ -1236,8 +1500,44 @@ function Content() {
   );
 }
 
+// Steam tells us about every new screenshot itself (no folder polling needed,
+// unlike the backend uploaders). Handles already dealt with are remembered so
+// a repeated notification can't upload twice.
+const steamAutoUploadHandled = new Set<string>();
+
+async function autoUploadNewSteamScreenshot(appId: number, handle: number): Promise<void> {
+  const key = `${appId}:${handle}`;
+  if (steamAutoUploadHandled.has(key)) return;
+  steamAutoUploadHandled.add(key);
+  try {
+    const first = await getSettings();
+    if (!first.auto_upload_steam) return;
+    await sleep(first.auto_upload_delay_steam * 1000);
+    // The toggle is checked again after the wait, so switching it off in that window cancels the upload.
+    const current = await getSettings();
+    if (!current.auto_upload_steam) return;
+    const shot = (await listSteamScreenshots()).find((s) => s.nAppID === appId && s.hHandle === handle);
+    if (!shot || shot.bUploaded) return; // deleted meanwhile, or already up
+    const outcome = await uploadSteamScreenshot(shot, current.steam_upload_privacy);
+    toaster.toast(
+      outcome.ok
+        ? { title: "Auto-uploaded to Steam", body: shot.strUrl.split("/").pop() ?? "" }
+        : { title: "Auto-upload to Steam failed", body: "Steam didn't accept the upload." }
+    );
+  } catch (e) {
+    console.error("Omni-Revi-Transfer: Steam auto-upload failed", e);
+  }
+}
+
 export default definePlugin(() => {
   console.log("Omni-Revi-Transfer initializing")
+
+  const steamScreenshotRegistration =
+    STEAM_SHARE_AVAILABLE && typeof SteamClient.GameSessions?.RegisterForScreenshotNotification === "function"
+      ? SteamClient.GameSessions.RegisterForScreenshotNotification((notification) => {
+          autoUploadNewSteamScreenshot(notification.details.nAppID, notification.details.hHandle);
+        })
+      : undefined;
 
   // Registered here, not inside a component: auto-uploads happen in the
   // background while the quick access menu is closed, and the toast must
@@ -1264,6 +1564,7 @@ export default definePlugin(() => {
     content: <Content />,
     icon: <FaCamera />,
     onDismount() {
+      steamScreenshotRegistration?.unregister();
       removeEventListener("auto_upload_result", autoUploadListener);
     },
   };

@@ -45,9 +45,13 @@ Omni-Revi-Transfer optionally lets a user post a screenshot to a Discord channel
 - **What we upload:** only the screenshot the user explicitly chooses to send, plus its game name as the message text, directly from the Deck to Discord.
 - **Revoking access:** "Unlink Discord" deletes the webhook on Discord and the local copy. The user can also delete the webhook at any time in the channel's Integrations settings, or remove the app under Discord's Authorized Apps.
 
+## Steam sharing (optional)
+
+The plugin can upload a screenshot the user chooses to **their own Steam account** and send its link to a friend in Steam chat. Both are performed by the user's own Steam client on their Deck, directly with Valve's services under the user's own Steam login; the plugin developer never receives the screenshots, the links, the friends list, or any message. The plugin reads the user's Steam friends list locally on the Deck only to let them pick a recipient. Uploads use the privacy level the user selects (Private by default; sending to a friend always uses Friends only), and the plugin cannot delete screenshots once they are uploaded to Steam.
+
 ## Optional automatic upload
 
-For each linked service (Google Drive, Discord) the user can turn on an "Auto-upload" setting, **off by default**. While it is on, each new screenshot taken while the plugin is running is uploaded to that service after a delay the user chooses (5 to 60 seconds, 10 by default), without a per-screenshot confirmation. Screenshots that existed before the setting was turned on are never uploaded automatically. The setting can be switched off at any time, and unlinking a service switches it off. Uploads go directly from the user's Deck to the chosen service, as described in the sections above; nothing is sent to the developer.
+For Steam, and for each linked service (Google Drive, Discord), the user can turn on an "Auto-upload" setting, **off by default**. While it is on, each new screenshot taken while the plugin is running is uploaded to that service after a delay the user chooses (5 to 60 seconds, 10 by default), without a per-screenshot confirmation. Screenshots that existed before the setting was turned on are never uploaded automatically. The setting can be switched off at any time, and unlinking a service switches it off. Uploads go directly from the user's Deck to the chosen service, as described in the sections above; nothing is sent to the developer.
 
 ## Data retention and deletion
 

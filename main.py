@@ -1136,6 +1136,13 @@ DEFAULT_SETTINGS = {
     # Seconds between taking a screenshot and its auto-upload, per service.
     "auto_upload_delay_google_drive": 10,
     "auto_upload_delay_discord": 10,
+    # Steam sharing runs in the frontend through Steam's own client (the
+    # backend can't call it), but its preferences live here with the rest.
+    # steam_upload_privacy uses Steam's EUCMFilePrivacyState values:
+    # 2 private, 4 friends only, 8 public, 16 unlisted. Private is the safe default.
+    "auto_upload_steam": False,
+    "auto_upload_delay_steam": 10,
+    "steam_upload_privacy": 2,
 }
 
 
@@ -1186,7 +1193,19 @@ def _validate_settings(raw: dict) -> dict:
         "auto_upload_delay_discord": _clamp_auto_upload_delay(
             raw.get("auto_upload_delay_discord", DEFAULT_SETTINGS["auto_upload_delay_discord"])
         ),
+        "auto_upload_steam": bool(raw.get("auto_upload_steam", DEFAULT_SETTINGS["auto_upload_steam"])),
+        "auto_upload_delay_steam": _clamp_auto_upload_delay(
+            raw.get("auto_upload_delay_steam", DEFAULT_SETTINGS["auto_upload_delay_steam"])
+        ),
+        "steam_upload_privacy": (
+            raw.get("steam_upload_privacy")
+            if raw.get("steam_upload_privacy") in STEAM_UPLOAD_PRIVACY_VALUES
+            else DEFAULT_SETTINGS["steam_upload_privacy"]
+        ),
     }
+
+
+STEAM_UPLOAD_PRIVACY_VALUES = (2, 4, 8, 16)
 
 
 def _disable_auto_upload(setting_key: str) -> None:
