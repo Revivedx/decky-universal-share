@@ -45,6 +45,8 @@ interface Settings {
   qr_share_duration_seconds: number;
   auto_upload_google_drive: boolean;
   auto_upload_discord: boolean;
+  auto_upload_delay_google_drive: number;
+  auto_upload_delay_discord: number;
   used_mb: number;
   over_limit: boolean;
   account_detected: boolean;
@@ -1014,8 +1016,55 @@ function StoragePanel() {
   );
 }
 
+// Bounds of the auto-upload delay slider; main.py enforces the same range.
+const AUTO_UPLOAD_DELAY_MIN = 5;
+const AUTO_UPLOAD_DELAY_MAX = 60;
+
+// The auto-upload toggle plus, once it's on, the slider for how long to wait
+// after a screenshot before uploading. The chosen value is shown in the
+// label itself (like the storage limit) rather than relying on the
+// slider's own value display.
+function AutoUploadOptions({
+  label,
+  description,
+  enabled,
+  delaySeconds,
+  onEnabledChange,
+  onDelayChange,
+}: {
+  label: string;
+  description: string;
+  enabled: boolean;
+  delaySeconds: number;
+  onEnabledChange: (value: boolean) => void;
+  onDelayChange: (seconds: number) => void;
+}) {
+  return (
+    <>
+      <PanelSectionRow>
+        <ToggleField label={label} description={description} checked={enabled} onChange={onEnabledChange} />
+      </PanelSectionRow>
+      {enabled && (
+        <PanelSectionRow>
+          <SliderField
+            label={`Upload delay: ${delaySeconds} s`}
+            description="How long to wait after a screenshot before it's uploaded. Delete it or switch this off in that time to cancel."
+            value={delaySeconds}
+            min={AUTO_UPLOAD_DELAY_MIN}
+            max={AUTO_UPLOAD_DELAY_MAX}
+            step={1}
+            onChange={onDelayChange}
+          />
+        </PanelSectionRow>
+      )}
+    </>
+  );
+}
+
 function ShareOptionsPanel() {
   const [expanded, setExpanded] = useState(false);
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [discordOpen, setDiscordOpen] = useState(false);
   const [settings, setLocalSettings] = useState<Settings | undefined>();
   const [driveLinked, setDriveLinked] = useState<boolean | undefined>();
   const [unlinking, setUnlinking] = useState(false);
@@ -1080,73 +1129,98 @@ function ShareOptionsPanel() {
       </PanelSectionRow>
 
       {expanded && settings && (
-        <PanelSectionRow>
-          <DropdownItem
-            label="QR link stays active for"
-            description="How long a 'Share via QR' link stays valid if nobody downloads it."
-            rgOptions={DURATION_OPTIONS}
-            selectedOption={settings.qr_share_duration_seconds}
-            onChange={(option) => update({ qr_share_duration_seconds: option.data })}
-          />
-        </PanelSectionRow>
+        <>
+          <PanelSectionRow>
+            <div style={{ fontWeight: 600 }}>QR Link</div>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <DropdownItem
+              label="QR link stays active for"
+              description="How long a 'Share via QR' link stays valid if nobody downloads it."
+              rgOptions={DURATION_OPTIONS}
+              selectedOption={settings.qr_share_duration_seconds}
+              onChange={(option) => update({ qr_share_duration_seconds: option.data })}
+            />
+          </PanelSectionRow>
+        </>
       )}
 
       {expanded && GOOGLE_DRIVE_ENABLED && (
-        <PanelSectionRow>
-          {driveLinked ? (
-            <ButtonItem layout="below" disabled={unlinking} onClick={onUnlinkDrive}>
-              {unlinking ? "Unlinking..." : "Unlink Google Drive"}
+        <>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => setDriveOpen((o) => !o)}>
+              Google Drive{driveLinked ? " (linked)" : ""} {driveOpen ? "▲" : "▼"}
             </ButtonItem>
-          ) : (
-            <ButtonItem
-              layout="below"
-              disabled={driveLinked === undefined}
-              onClick={() => openGoogleDriveConfirmModal(refreshDriveStatus)}
-            >
-              Link Google Drive
-            </ButtonItem>
-          )}
-        </PanelSectionRow>
-      )}
+          </PanelSectionRow>
 
-      {expanded && GOOGLE_DRIVE_ENABLED && driveLinked && settings && (
-        <PanelSectionRow>
-          <ToggleField
-            label="Auto-upload to Google Drive"
-            description="Uploads each new screenshot about 30 seconds after you take it, without asking. Anything in your screenshots gets uploaded, so leave this off if that's a concern."
-            checked={settings.auto_upload_google_drive}
-            onChange={(value) => update({ auto_upload_google_drive: value })}
-          />
-        </PanelSectionRow>
+          {driveOpen && (
+            <PanelSectionRow>
+              {driveLinked ? (
+                <ButtonItem layout="below" disabled={unlinking} onClick={onUnlinkDrive}>
+                  {unlinking ? "Unlinking..." : "Unlink Google Drive"}
+                </ButtonItem>
+              ) : (
+                <ButtonItem
+                  layout="below"
+                  disabled={driveLinked === undefined}
+                  onClick={() => openGoogleDriveConfirmModal(refreshDriveStatus)}
+                >
+                  Link Google Drive
+                </ButtonItem>
+              )}
+            </PanelSectionRow>
+          )}
+
+          {driveOpen && driveLinked && settings && (
+            <AutoUploadOptions
+              label="Auto-upload to Google Drive"
+              description="Uploads each new screenshot without asking. Anything in your screenshots gets uploaded, so leave this off if that's a concern."
+              enabled={settings.auto_upload_google_drive}
+              delaySeconds={settings.auto_upload_delay_google_drive}
+              onEnabledChange={(value) => update({ auto_upload_google_drive: value })}
+              onDelayChange={(seconds) => update({ auto_upload_delay_google_drive: seconds })}
+            />
+          )}
+        </>
       )}
 
       {expanded && DISCORD_ENABLED && (
-        <PanelSectionRow>
-          {discordLinked ? (
-            <ButtonItem layout="below" disabled={unlinkingDiscord} onClick={onUnlinkDiscord}>
-              {unlinkingDiscord ? "Unlinking..." : "Unlink Discord"}
+        <>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => setDiscordOpen((o) => !o)}>
+              Discord{discordLinked ? " (linked)" : ""} {discordOpen ? "▲" : "▼"}
             </ButtonItem>
-          ) : (
-            <ButtonItem
-              layout="below"
-              disabled={discordLinked === undefined}
-              onClick={() => openDiscordConfirmModal(refreshDiscordStatus)}
-            >
-              Link Discord
-            </ButtonItem>
-          )}
-        </PanelSectionRow>
-      )}
+          </PanelSectionRow>
 
-      {expanded && DISCORD_ENABLED && discordLinked && settings && (
-        <PanelSectionRow>
-          <ToggleField
-            label="Auto-upload to Discord"
-            description="Posts each new screenshot to your linked channel about 30 seconds after you take it, without asking. Anyone in that channel will see it."
-            checked={settings.auto_upload_discord}
-            onChange={(value) => update({ auto_upload_discord: value })}
-          />
-        </PanelSectionRow>
+          {discordOpen && (
+            <PanelSectionRow>
+              {discordLinked ? (
+                <ButtonItem layout="below" disabled={unlinkingDiscord} onClick={onUnlinkDiscord}>
+                  {unlinkingDiscord ? "Unlinking..." : "Unlink Discord"}
+                </ButtonItem>
+              ) : (
+                <ButtonItem
+                  layout="below"
+                  disabled={discordLinked === undefined}
+                  onClick={() => openDiscordConfirmModal(refreshDiscordStatus)}
+                >
+                  Link Discord
+                </ButtonItem>
+              )}
+            </PanelSectionRow>
+          )}
+
+          {discordOpen && discordLinked && settings && (
+            <AutoUploadOptions
+              label="Auto-upload to Discord"
+              description="Posts each new screenshot to your linked channel without asking. Anyone in that channel will see it."
+              enabled={settings.auto_upload_discord}
+              delaySeconds={settings.auto_upload_delay_discord}
+              onEnabledChange={(value) => update({ auto_upload_discord: value })}
+              onDelayChange={(seconds) => update({ auto_upload_delay_discord: seconds })}
+            />
+          )}
+        </>
       )}
     </PanelSection>
   );

@@ -1133,6 +1133,9 @@ DEFAULT_SETTINGS = {
     # screenshot is uploaded automatically shortly after it's taken.
     "auto_upload_google_drive": False,
     "auto_upload_discord": False,
+    # Seconds between taking a screenshot and its auto-upload, per service.
+    "auto_upload_delay_google_drive": 10,
+    "auto_upload_delay_discord": 10,
 }
 
 
@@ -1177,6 +1180,12 @@ def _validate_settings(raw: dict) -> dict:
             raw.get("auto_upload_google_drive", DEFAULT_SETTINGS["auto_upload_google_drive"])
         ),
         "auto_upload_discord": bool(raw.get("auto_upload_discord", DEFAULT_SETTINGS["auto_upload_discord"])),
+        "auto_upload_delay_google_drive": _clamp_auto_upload_delay(
+            raw.get("auto_upload_delay_google_drive", DEFAULT_SETTINGS["auto_upload_delay_google_drive"])
+        ),
+        "auto_upload_delay_discord": _clamp_auto_upload_delay(
+            raw.get("auto_upload_delay_discord", DEFAULT_SETTINGS["auto_upload_delay_discord"])
+        ),
     }
 
 
@@ -1195,19 +1204,36 @@ def _disable_auto_upload(setting_key: str) -> None:
 # plugin starts are only remembered, never uploaded (turning this on must not
 # dump the whole existing library into someone's Drive/Discord), and ones
 # taken while the plugin isn't running are never picked up. Each new file
-# waits AUTO_UPLOAD_DELAY_SECONDS (also lets Steam finish writing it), and the
-# toggles are read again at upload time, so switching one off during that
-# window cancels the upload.
+# waits the user's chosen delay for each service (which also lets Steam finish
+# writing it), and the toggles and delays are read again on every check, so
+# switching a service off during that window cancels its upload.
 
-AUTO_UPLOAD_DELAY_SECONDS = 30
-AUTO_UPLOAD_POLL_SECONDS = 5
+AUTO_UPLOAD_DEFAULT_DELAY_SECONDS = 10
+AUTO_UPLOAD_MIN_DELAY_SECONDS = 5
+AUTO_UPLOAD_MAX_DELAY_SECONDS = 60
+AUTO_UPLOAD_POLL_SECONDS = 2
+
+# (display name, toggle setting, delay setting)
+_AUTO_UPLOAD_SERVICES = (
+    ("Google Drive", "auto_upload_google_drive", "auto_upload_delay_google_drive"),
+    ("Discord", "auto_upload_discord", "auto_upload_delay_discord"),
+)
+
+
+def _clamp_auto_upload_delay(value) -> int:
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = AUTO_UPLOAD_DEFAULT_DELAY_SECONDS
+    return max(AUTO_UPLOAD_MIN_DELAY_SECONDS, min(AUTO_UPLOAD_MAX_DELAY_SECONDS, value))
 
 
 class _AutoUploader:
     def __init__(self) -> None:
         self._task: Optional[asyncio.Task] = None
         self._seen: set = set()
-        # path -> [due monotonic time, size when first seen]
+        # path -> {"first_seen": monotonic time, "size": latest size,
+        #          "prev_size": size at the previous check, "done": services handled}
         self._pending: dict = {}
 
     async def start(self) -> None:
@@ -1233,45 +1259,59 @@ class _AutoUploader:
 
     async def _tick(self) -> None:
         now = time.monotonic()
-        for item in await _run_blocking(_list_steam_screenshots):
-            if item["path"] not in self._seen:
-                self._seen.add(item["path"])
-                self._pending[item["path"]] = [now + AUTO_UPLOAD_DELAY_SECONDS, item["size"]]
+        settings = _load_settings()
+        sizes = {item["path"]: item["size"] for item in await _run_blocking(_list_steam_screenshots)}
 
-        for path in [p for p, (due, _) in self._pending.items() if due <= now]:
-            _, first_size = self._pending.pop(path)
-            try:
-                size_now = os.path.getsize(path)
-            except OSError:
-                continue  # deleted (e.g. by the user or the storage auto-delete) before its turn
-            if size_now != first_size:
-                # Still being written; look again on the next round.
-                self._pending[path] = [now + AUTO_UPLOAD_POLL_SECONDS, size_now]
+        for path, size in sizes.items():
+            if path not in self._seen:
+                self._seen.add(path)
+                self._pending[path] = {"first_seen": now, "size": size, "prev_size": None, "done": set()}
+
+        for path in list(self._pending):
+            entry = self._pending[path]
+            if path not in sizes:
+                del self._pending[path]  # deleted (by the user or storage auto-delete) before its turn
                 continue
-            await self._upload(path)
+            entry["prev_size"], entry["size"] = entry["size"], sizes[path]
+            still_being_written = entry["size"] != entry["prev_size"]
 
-    async def _upload(self, path: str) -> None:
+            for service, toggle_key, delay_key in _AUTO_UPLOAD_SERVICES:
+                if service in entry["done"]:
+                    continue
+                if now - entry["first_seen"] < _clamp_auto_upload_delay(settings.get(delay_key)):
+                    continue
+                if still_being_written:
+                    continue
+                entry["done"].add(service)  # decided now: uploaded, or skipped because it's off
+                if settings.get(toggle_key):
+                    await self._upload(service, path)
+
+            if len(entry["done"]) == len(_AUTO_UPLOAD_SERVICES):
+                del self._pending[path]
+
+    async def _upload(self, service: str, path: str) -> None:
         real = _is_inside_steam_screenshots(path)
         if real is None:
             return
-        settings = _load_settings()
-        filename = os.path.basename(real)
-        jobs = []
-        if GOOGLE_DRIVE_ENABLED and settings.get("auto_upload_google_drive") and _load_google_token() is not None:
-            jobs.append(("Google Drive", _upload_screenshot_to_drive))
-        if DISCORD_ENABLED and settings.get("auto_upload_discord") and _discord_webhook_url() is not None:
-            jobs.append(("Discord", _upload_screenshot_to_discord))
+        if service == "Google Drive":
+            if not (GOOGLE_DRIVE_ENABLED and _load_google_token() is not None):
+                return
+            upload = _upload_screenshot_to_drive
+        else:
+            if not (DISCORD_ENABLED and _discord_webhook_url() is not None):
+                return
+            upload = _upload_screenshot_to_discord
 
-        for service, upload in jobs:
-            result = await upload(real)
-            error = result.get("error")
-            if result.get("ok"):
-                decky.logger.info(f"Auto-upload: {filename} sent to {service}.")
-            elif error == "duplicate":
-                continue  # already there; nothing worth telling the user
-            else:
-                decky.logger.warning(f"Auto-upload: {filename} to {service} failed ({error}).")
-            await decky.emit("auto_upload_result", service, filename, bool(result.get("ok")), error)
+        filename = os.path.basename(real)
+        result = await upload(real)
+        error = result.get("error")
+        if result.get("ok"):
+            decky.logger.info(f"Auto-upload: {filename} sent to {service}.")
+        elif error == "duplicate":
+            return  # already there; nothing worth telling the user
+        else:
+            decky.logger.warning(f"Auto-upload: {filename} to {service} failed ({error}).")
+        await decky.emit("auto_upload_result", service, filename, bool(result.get("ok")), error)
 
 
 _auto_uploader = _AutoUploader()

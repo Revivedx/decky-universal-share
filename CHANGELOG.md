@@ -6,11 +6,12 @@ All notable changes to Omni-Revi-Transfer are documented in this file. Format lo
 
 ### Added
 - **Discord sharing**: link a Discord channel from Share options (OAuth `webhook.incoming`, completed in the Deck's Steam browser through a `localhost` callback) and post screenshots to it from the Share dropdown. Includes the same sudo-password confirmation as Google Drive, obfuscated storage of the webhook, single-use `state` protection, mentions disabled on posts, and webhook deletion on unlink. Posts to a channel only; Discord offers no legitimate way to DM as the user.
-- **Auto-upload** toggles in Share options for Google Drive and Discord (each shown only while that service is linked, off by default): new screenshots are uploaded about 30 seconds after they're taken, with a toast reporting the result. Existing screenshots are never uploaded, toggles are re-checked at upload time, and unlinking a service switches its toggle off.
+- **Auto-upload** toggles in Share options for Google Drive and Discord (each shown only while that service is linked, off by default): new screenshots are uploaded after a per-service delay chosen with a slider (5–60 seconds, 10 by default), with a toast reporting the result. Existing screenshots are never uploaded, toggles are re-checked at upload time, and unlinking a service switches its toggle off.
 - `discord_credentials.example.json`, and `DISCORD_ENABLED` flags (on for `test`, off for `main`) with the same release-zip gating as Google credentials.
 - `PRIVACY.md` and README sections for Discord.
 
 ### Changed
+- **Share options reorganized** into three blocks: QR Link, Google Drive and Discord. The two services are collapsible and hold their own link/unlink button and auto-upload options.
 - Google Drive is enabled on the `test` branch (`GOOGLE_DRIVE_ENABLED = True` in `main.py` and `src/index.tsx`) for testing under the renamed project; `main` keeps it off until Google's verification is approved.
 - Manual upload logic for Drive and Discord moved into shared functions used by both the Share menu and auto-upload.
 - Token storage helpers (`_load_obfuscated_json` / `_save_obfuscated_json`) are now shared between Google Drive and Discord.
