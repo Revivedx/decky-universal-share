@@ -1,4 +1,4 @@
-"""Decky Universal Share - backend.
+"""Omni-Revi-Transfer - backend.
 
 V1 scope: a gallery and manager for the screenshots Steam already takes
 natively (Steam button + R1/RB), instead of the plugin capturing on its own.
@@ -596,7 +596,7 @@ def _drive_file_exists(access_token: str, filename: str, folder_id: str) -> bool
 
 
 async def _get_drive_game_folder_id(access_token: str, appid: str) -> Optional[str]:
-    """Returns the id of "decky-universal-share/screenshots/<Game Name>" in the
+    """Returns the id of "omni-revi-transfer/screenshots/<Game Name>" in the
     user's Drive, creating any of the three levels on first use and caching
     their ids locally afterwards (one folder id per appid, plus the two
     shared parent folder ids)."""
@@ -606,7 +606,7 @@ async def _get_drive_game_folder_id(access_token: str, appid: str) -> Optional[s
 
     root_id = token_data.get("root_folder_id")
     if not root_id:
-        root_id = await _run_blocking(_get_or_create_drive_folder, access_token, "decky-universal-share", None)
+        root_id = await _run_blocking(_get_or_create_drive_folder, access_token, "omni-revi-transfer", None)
         if root_id is None:
             decky.logger.warning("Google Drive: could not create/find the app's root folder.")
             return None
@@ -651,7 +651,7 @@ def _upload_file_to_drive(access_token: str, path: str, folder_id: Optional[str]
     if folder_id:
         metadata_dict["parents"] = [folder_id]
 
-    boundary = "decky_universal_share_boundary"
+    boundary = "omni_revi_transfer_boundary"
     metadata = json.dumps(metadata_dict).encode("utf-8")
     body = (
         f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode("utf-8")
@@ -730,7 +730,7 @@ def _obfuscation_key() -> bytes:
             machine_id = f.read().strip()
     except OSError:
         machine_id = decky.DECKY_USER_HOME  # still device-local, a reasonable fallback
-    return hashlib.sha256(f"decky-universal-share:{machine_id}".encode("utf-8")).digest()
+    return hashlib.sha256(f"omni-revi-transfer:{machine_id}".encode("utf-8")).digest()
 
 
 def _xor_bytes(data: bytes, key: bytes) -> bytes:
@@ -1036,7 +1036,7 @@ class Plugin:
         return await _run_blocking(_upload_file_to_drive, access_token, real, folder_id)
 
     async def _main(self) -> None:
-        decky.logger.info("Universal Share started (indexing Steam's native screenshots).")
+        decky.logger.info("Omni-Revi-Transfer started (indexing Steam's native screenshots).")
         if GOOGLE_DRIVE_ENABLED and not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
             decky.logger.warning(
                 f"Google Drive is enabled but {GOOGLE_CREDENTIALS_PATH} is missing or incomplete; "
@@ -1050,7 +1050,7 @@ class Plugin:
 
     async def _unload(self) -> None:
         await _share_server.stop()
-        decky.logger.info("Universal Share stopped.")
+        decky.logger.info("Omni-Revi-Transfer stopped.")
 
     async def _uninstall(self) -> None:
-        decky.logger.info("Universal Share uninstalled.")
+        decky.logger.info("Omni-Revi-Transfer uninstalled.")

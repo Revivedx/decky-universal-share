@@ -1,8 +1,8 @@
-# Privacy Policy — Decky Universal Share
+# Privacy Policy — Omni-Revi-Transfer
 
 **Last updated:** 2026-09-18 (plugin version 0.0.5a)
 
-Decky Universal Share ("the plugin") is a [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck. It runs entirely on the user's own device. This document explains what data the plugin touches, how the optional Google Drive feature works, and how to contact us.
+Omni-Revi-Transfer ("the plugin") is a [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck. It runs entirely on the user's own device. This document explains what data the plugin touches, how the optional Google Drive feature works, and how to contact us.
 
 **Note:** as of version 0.0.5a, the Google Drive feature described below is implemented but temporarily disabled in the shipped plugin while its Google OAuth app goes through Google's verification process. This policy describes how it behaves once enabled.
 
@@ -28,9 +28,9 @@ When the user chooses "Share via QR" for a screenshot, the plugin starts a tempo
 
 ## Google Drive integration (optional, off unless the user links it)
 
-Decky Universal Share optionally lets a user upload a screenshot to **their own** Google Drive. This feature is entirely opt-in:
+Omni-Revi-Transfer optionally lets a user upload a screenshot to **their own** Google Drive. This feature is entirely opt-in:
 
-- **What we access:** the plugin requests only the [`drive.file`](https://developers.google.com/drive/api/guides/api-specific-auth) OAuth scope — the narrowest scope Google Drive offers. This scope only ever grants access to files and folders that this plugin itself creates in the user's Drive (organized under a `decky-universal-share/screenshots/<Game Name>` folder structure it creates on first upload). The plugin cannot see, list, read, or modify any other file already in the user's Drive.
+- **What we access:** the plugin requests only the [`drive.file`](https://developers.google.com/drive/api/guides/api-specific-auth) OAuth scope — the narrowest scope Google Drive offers. This scope only ever grants access to files and folders that this plugin itself creates in the user's Drive (organized under a `omni-revi-transfer/screenshots/<Game Name>` folder structure it creates on first upload). The plugin cannot see, list, read, or modify any other file already in the user's Drive.
 - **What we upload:** only the specific screenshot file the user explicitly chooses to upload, at the moment they choose to upload it. Nothing is uploaded automatically or in the background.
 - **Where the session is stored:** signing in uses Google's OAuth "device flow" (the user approves access on their own phone/browser, not by giving the plugin a password). Google then issues a long-lived refresh token, which is stored **locally on the user's own Steam Deck only** — never transmitted to the developer or to any server other than Google's own OAuth endpoints. That local file is obfuscated at rest (not left as human-readable plaintext) as a defense-in-depth measure against casual exposure, though this is disclosed to the user as obfuscation rather than strong encryption before they link their account, alongside an explicit warning about what a compromised device could mean for that saved session.
 - **Revoking access:** the user can unlink Google Drive at any time from the plugin's Share options panel. This deletes the locally stored session and revokes the token with Google directly, exactly like removing an app from your [Google Account's connected apps list](https://myaccount.google.com/permissions).
@@ -53,4 +53,4 @@ If this policy changes, the updated version will be published at this same URL i
 
 For questions about this policy or the plugin's data handling, contact: **decky.universal.share@gmail.com**
 
-Source code (fully open and auditable): https://github.com/Revivedx/decky-universal-share
+Source code (fully open and auditable): https://github.com/Revivedx/omni-revi-transfer

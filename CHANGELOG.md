@@ -1,11 +1,20 @@
 # Changelog
 
-All notable changes to Decky Universal Share are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to Omni-Revi-Transfer are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Changed
+- Renamed the project from "Decky Universal Share" to **Omni-Revi-Transfer — for Decky**, across the GitHub repository, `package.json`/`plugin.json` names, in-app plugin title, log messages, and the Google Drive upload folder path (now `omni-revi-transfer/screenshots/<Game Name>`). Motivated by Google's OAuth branding verification repeatedly flagging the old name as not uniquely identifying a brand (it read as a generic description of "a universal way to share on Decky" rather than a distinct product name).
+- All documentation (`README.md`, `PRIVACY.md`) and release artifact naming (`omni-revi-transfer-vX.Y.Z.zip`) updated to match.
+
+### Action required (not automated by this change)
+- Update the OAuth consent screen's app name, homepage URL, and Authorized domain in Google Cloud Console to match the renamed GitHub Pages URL (the Pages URL changes to `https://revivedx.github.io/omni-revi-transfer/` once the repo rename propagates), and re-verify domain ownership in Google Search Console under that new path.
 
 ## [0.0.5a] - 2026-09-18
 
 ### Added
-- Google Drive upload from the screenshot preview's Share menu, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game), with duplicate-upload detection.
+- Google Drive upload from the screenshot preview's Share menu, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game) at the time of this release — see [Unreleased](#unreleased) above for the later folder-path rename, with duplicate-upload detection.
 - Google OAuth device-flow linking (scan a QR, approve on your phone) with a step-up sudo-password confirmation gate before a link can start, and an explicit on-screen disclosure of what a compromised Deck could mean for the saved session.
 - At-rest obfuscation (not full encryption, disclosed as such) for the locally stored Google session token.
 - "Unlimited" option for the storage warning limit, alongside the existing 0.5–50 GB range.

@@ -1,15 +1,15 @@
-# Decky Universal Share
+# Omni-Revi-Transfer — for Decky
 
-**What this app does:** Decky Universal Share is a plugin for the Steam Deck (installed through [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)) that lets you browse, manage, and share the screenshots your Deck already takes — right from the in-game Quick Access Menu. You can preview them, delete old ones, share one instantly to your phone with a QR code, or upload one to your own Google Drive, without ever leaving your controller.
+**What this app does:** Omni-Revi-Transfer is a plugin for the Steam Deck (installed through [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)) that lets you browse, manage, and share the screenshots your Deck already takes — right from the in-game Quick Access Menu. You can preview them, delete old ones, share one instantly to your phone with a QR code, or upload one to your own Google Drive, without ever leaving your controller.
 
 **Version 0.0.5a** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Installing (no build tools needed)
 
-1. Grab the latest `decky-universal-share-vX.Y.Z.zip` from this repo's [Releases](https://github.com/Revivedx/decky-universal-share/releases) page (or build one yourself, see below).
+1. Grab the latest `omni-revi-transfer-vX.Y.Z.zip` from this repo's [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or build one yourself, see below).
 2. On the Deck (or any Linux machine running Decky Loader), open Decky's Quick Access Menu → **Settings** → enable **Developer Mode** if it isn't already.
 3. In the Decky Settings' **Developer** tab, use **Install Plugin from ZIP** and pick the file.
-4. Decky Universal Share should now show up in the plugin list — no compiling, no SSH, no Node/Python toolchain required on your end.
+4. Omni-Revi-Transfer should now show up in the plugin list — no compiling, no SSH, no Node/Python toolchain required on your end.
 
 ## What it does (current scope)
 
@@ -18,7 +18,7 @@
 - **Delete**: removes the screenshot file and its cached thumbnail. (Steam's own `760/screenshots.vdf` index isn't touched — Steam tolerates manually removed files and prunes the stale entry on its next scan, same as deleting the file from a file manager would.)
 - **Share via QR**: starts a local, LAN-only HTTP server that serves *only* the selected screenshot, and shows a QR code (generated 100% locally — no third-party service involved) that a phone on the same Wi-Fi can scan to download it. See [Security notes](#security-notes-for-share-via-qr) below for how this is hardened.
 - **Share menu placeholders**: the Share dropdown also lists "iCloud" as a future option. It currently only shows a "Coming soon" toast — no integration exists yet.
-- **Google Drive upload** *(currently disabled — see [Google Drive status](#google-drive-status) below)*: uploads a screenshot to the user's own Google Drive, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game), with duplicate detection so re-uploading the same file is a no-op. Linking requires confirming the Deck's own sudo password first (see [Security notes for Google Drive](#security-notes-for-google-drive) below).
+- **Google Drive upload** *(currently disabled — see [Google Drive status](#google-drive-status) below)*: uploads a screenshot to the user's own Google Drive, organized under `omni-revi-transfer/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game), with duplicate detection so re-uploading the same file is a no-op. Linking requires confirming the Deck's own sudo password first (see [Security notes for Google Drive](#security-notes-for-google-drive) below).
 - **Storage panel**: a collapsible summary showing how much space Steam's screenshots are using, with a configurable warning limit (0.5–50 GB, or Unlimited). Exceeding it only shows a warning — it never blocks Steam from saving a new screenshot (the plugin doesn't control that). Alerts fire once per threshold crossing at 80/90/100% usage. There's an opt-in, **off-by-default** "auto-delete oldest when over limit" toggle for anyone who wants that risk; its description explicitly warns that it permanently deletes screenshots from *any* game without asking (and is automatically disabled when the limit is set to Unlimited).
 - **Share options panel**: lets you configure how long a "Share via QR" link stays active before expiring on its own (1/5/10/30 minutes), and (once re-enabled) link/unlink Google Drive.
 
@@ -90,7 +90,7 @@ This repo's deploy path is custom (built while developing on Windows against a p
 1a. (Only needed while working on the Google Drive integration itself) copy `google_credentials.example.json` to `google_credentials.json` (gitignored) and fill in a real OAuth client id/secret. Not required otherwise — `GOOGLE_DRIVE_ENABLED = False` means it's never read.
 2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
 3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
-4. `npm run package` — builds the frontend and produces `release/decky-universal-share-vX.Y.Z.zip`, laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
+4. `npm run package` — builds the frontend and produces `release/omni-revi-transfer-vX.Y.Z.zip`, laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
 
 ## Not currently used
 

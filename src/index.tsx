@@ -917,11 +917,11 @@ function Content() {
 }
 
 export default definePlugin(() => {
-  console.log("Decky Universal Share initializing")
+  console.log("Omni-Revi-Transfer initializing")
 
   return {
-    name: "Decky Universal Share",
-    titleView: <div className={staticClasses.Title}>Universal Share</div>,
+    name: "Omni-Revi-Transfer",
+    titleView: <div className={staticClasses.Title}>Omni-Revi-Transfer</div>,
     content: <Content />,
     icon: <FaCamera />,
     onDismount() {},

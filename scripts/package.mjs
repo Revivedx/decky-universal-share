@@ -5,8 +5,8 @@
 // Layout matches what Decky Loader expects (see README.md's "Distribution"
 // section, and https://wiki.deckbrew.xyz for the authoritative reference):
 //
-//   decky-universal-share-v0.0.1.zip
-//     Decky Universal Share/
+//   omni-revi-transfer-v0.0.5a.zip
+//     Omni-Revi-Transfer/
 //       dist/
 //         index.js
 //       package.json
@@ -35,7 +35,7 @@ const pluginName = pluginMeta.name;
 const version = packageMeta.version;
 
 const releaseDir = path.join(rootDir, "release");
-const zipPath = path.join(releaseDir, `decky-universal-share-v${version}.zip`);
+const zipPath = path.join(releaseDir, `omni-revi-transfer-v${version}.zip`);
 
 // Files that must exist for the plugin to install and run at all.
 const requiredFiles = ["dist/index.js", "package.json", "plugin.json", "main.py"];
