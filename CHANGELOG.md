@@ -12,6 +12,7 @@ All notable changes to Omni-Revi-Transfer are documented in this file. Format lo
 - `PRIVACY.md` and README sections for Discord.
 
 ### Changed
+- **Performance** (measured on a real Deck): the screenshot folders are no longer walked in full every 2 seconds and several times per menu open. A cached, per-folder index (re-reading only folders whose timestamp changed, with a guard for coarse-timestamp SD cards) now backs the gallery, storage checks and auto-delete; the Drive/Discord auto-upload watcher scans nothing while its toggles are off and finds new files by timestamp when on; game names are cached; `urllib.request` and the certificate bundle load on first use instead of at startup; settings sliders save after a short pause instead of on every step; and Steam auto-upload reads a light config endpoint instead of the full settings. With 20,000 screenshots, a gallery refresh went from ~358 ms to ~0.6 ms and the watcher from ~218 ms per check to ~0.02 ms; the plugin's resident memory at startup went from 38.8 MB to 36.7 MB (PSS 16.1 to 14.9 MB).
 - **Share options reorganized** into three blocks: QR Link, Google Drive and Discord. The two services are collapsible and hold their own link/unlink button and auto-upload options.
 - Google Drive is enabled on the `test` branch (`GOOGLE_DRIVE_ENABLED = True` in `main.py` and `src/index.tsx`) for testing under the renamed project; `main` keeps it off until Google's verification is approved.
 - Manual upload logic for Drive and Discord moved into shared functions used by both the Share menu and auto-upload.

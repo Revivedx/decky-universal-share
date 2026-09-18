@@ -31,11 +31,9 @@ import re
 import secrets
 import shutil
 import socket
-import ssl
+import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Optional
 
 import decky
@@ -118,9 +116,19 @@ def _steamapps_dirs() -> list[str]:
     return dirs
 
 
+# appid -> name. Names never change for an installed game, and reading them
+# means parsing libraryfolders.vdf plus an appmanifest, so successful lookups
+# are remembered (the "Game (<appid>)" fallback is not, in case the game is
+# installed later).
+_app_name_cache: dict = {}
+
+
 def _resolve_app_name(appid: str) -> str:
     if appid == "7":
         return "SteamOS / Desktop"
+    cached = _app_name_cache.get(appid)
+    if cached:
+        return cached
     for steamapps_dir in _steamapps_dirs():
         manifest = os.path.join(steamapps_dir, f"appmanifest_{appid}.acf")
         try:
@@ -130,6 +138,7 @@ def _resolve_app_name(appid: str) -> str:
             continue
         match = re.search(r'"name"\s*"([^"]+)"', content)
         if match:
+            _app_name_cache[appid] = match.group(1)
             return match.group(1)
     return f"Game ({appid})"
 
@@ -145,42 +154,99 @@ def _resolve_drive_folder_name(appid: str) -> str:
 
 # --- Screenshot listing and metadata -----------------------------------------
 
-def _list_steam_screenshots() -> list[dict]:
-    """Walks userdata/<id>/760/remote/<appid>/screenshots/ for every game."""
-    remote_root = _steam_remote_root()
-    if remote_root is None:
-        return []
+# A screenshot as kept in the index: (path, appid, modified time, size in
+# bytes). Plain tuples, not dicts, because a library can hold tens of
+# thousands and a dict per file costs several times more memory.
+_IDX_PATH, _IDX_APPID, _IDX_MODIFIED, _IDX_SIZE = range(4)
 
-    results = []
-    try:
-        appid_dirs = os.listdir(remote_root)
-    except OSError:
-        return []
+# A folder's modification time is only trusted once it is this old. On
+# filesystems with coarse timestamps (exFAT/FAT microSD cards: 2 s) a file
+# added just after a scan could otherwise leave the time unchanged and never
+# be noticed.
+_INDEX_STABLE_NS = 3_000_000_000
 
-    for appid in appid_dirs:
-        shots_dir = os.path.join(remote_root, appid, "screenshots")
-        if not os.path.isdir(shots_dir):
-            continue
+
+class _ScreenshotIndex:
+    """Cached listing of every screenshot, kept per <appid>/screenshots folder.
+
+    Walking every file is O(library size), and used to happen every 2 s (the
+    auto-upload watcher) plus several times each time the menu opened. Adding
+    or deleting a file changes its folder's modification time, so a call only
+    stats the folders (about one per game) and re-reads the ones that
+    changed. Thumbnails live in a subfolder and don't affect this."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._root: Optional[str] = None
+        # folder -> (folder mtime_ns, time.time_ns() when scanned, [entries])
+        self._folders: dict = {}
+        self._merged: list = []
+        self._total = 0
+
+    @staticmethod
+    def _scan(shots_dir: str, appid: str) -> list:
+        entries = []
         try:
-            entries = os.scandir(shots_dir)
+            scan = os.scandir(shots_dir)
         except OSError:
-            continue
-        with entries:
-            for e in entries:
+            return entries
+        with scan:
+            for e in scan:
                 if not e.is_file() or not e.name.lower().endswith(_SCREENSHOT_EXTENSIONS):
                     continue
-                thumb_path = os.path.join(shots_dir, "thumbnails", e.name)
-                results.append({
-                    "path": e.path,
-                    "filename": e.name,
-                    "appid": appid,
-                    "modified": e.stat().st_mtime,
-                    "size": e.stat().st_size,
-                    "thumbnail_path": thumb_path if os.path.isfile(thumb_path) else e.path,
-                })
+                st = e.stat()
+                entries.append((e.path, appid, st.st_mtime, st.st_size))
+        return entries
 
-    results.sort(key=lambda item: item["modified"], reverse=True)
-    return results
+    def snapshot(self) -> tuple:
+        """(entries newest first, total bytes). The list is shared: never modify it."""
+        with self._lock:
+            root = _steam_remote_root()
+            if root is None:
+                return self._replace_all({}, None)
+            try:
+                appids = os.listdir(root)
+            except OSError:
+                return self._replace_all({}, None)
+
+            if root != self._root:
+                self._folders = {}
+            changed = root != self._root
+            folders = {}
+            for appid in appids:
+                shots_dir = os.path.join(root, appid, "screenshots")
+                try:
+                    mtime_ns = os.stat(shots_dir).st_mtime_ns
+                except OSError:
+                    continue  # no screenshots folder for this app
+                cached = self._folders.get(shots_dir)
+                if cached and cached[0] == mtime_ns and cached[1] - mtime_ns > _INDEX_STABLE_NS:
+                    folders[shots_dir] = cached
+                    continue
+                folders[shots_dir] = (mtime_ns, time.time_ns(), self._scan(shots_dir, appid))
+                changed = True
+            if changed or set(folders) != set(self._folders):
+                return self._replace_all(folders, root)
+            return self._merged, self._total
+
+    def _replace_all(self, folders: dict, root: Optional[str]) -> tuple:
+        self._root = root
+        self._folders = folders
+        merged = [entry for _, _, entries in folders.values() for entry in entries]
+        merged.sort(key=lambda entry: entry[_IDX_MODIFIED], reverse=True)
+        self._merged = merged
+        self._total = sum(entry[_IDX_SIZE] for entry in merged)
+        return merged, self._total
+
+
+_screenshot_index = _ScreenshotIndex()
+
+
+def _thumbnail_path(entry: tuple) -> str:
+    """Steam's cached thumbnail for a screenshot, or the image itself if it has none."""
+    path = entry[_IDX_PATH]
+    thumb = os.path.join(os.path.dirname(path), "thumbnails", os.path.basename(path))
+    return thumb if os.path.isfile(thumb) else path
 
 
 def _is_inside_steam_screenshots(path: str) -> Optional[str]:
@@ -213,7 +279,7 @@ def _file_to_data_uri(path: str) -> str:
 
 
 def _total_storage_bytes() -> int:
-    return sum(item["size"] for item in _list_steam_screenshots())
+    return _screenshot_index.snapshot()[1]
 
 
 def _delete_screenshot_files(path: str) -> bool:
@@ -246,8 +312,7 @@ async def _enforce_auto_delete(settings: dict) -> int:
         return 0
 
     limit_bytes = settings["max_storage_mb"] * 1024 * 1024
-    items = _list_steam_screenshots()  # already sorted newest to oldest
-    total_bytes = sum(item["size"] for item in items)
+    items, total_bytes = _screenshot_index.snapshot()  # already sorted newest to oldest
     if total_bytes <= limit_bytes:
         return 0
 
@@ -255,8 +320,8 @@ async def _enforce_auto_delete(settings: dict) -> int:
     for item in reversed(items):  # oldest to newest
         if total_bytes <= limit_bytes:
             break
-        if _delete_screenshot_files(item["path"]):
-            total_bytes -= item["size"]
+        if _delete_screenshot_files(item[_IDX_PATH]):
+            total_bytes -= item[_IDX_SIZE]
             deleted += 1
 
     if deleted:
@@ -526,7 +591,9 @@ _CA_BUNDLE_CANDIDATES = (
 )
 
 
-def _build_ssl_context() -> ssl.SSLContext:
+def _build_ssl_context() -> "ssl.SSLContext":
+    import ssl
+
     for candidate in _CA_BUNDLE_CANDIDATES:
         if os.path.isfile(candidate):
             return ssl.create_default_context(cafile=candidate)
@@ -534,17 +601,48 @@ def _build_ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-_SSL_CONTEXT = _build_ssl_context()
+# `ssl` and `urllib.request` (which pulls in http.client, email, ...) cost
+# several MB of RAM, and most users never link Drive or Discord, so they're
+# imported, and the certificate bundle loaded, on the first HTTPS request
+# rather than when the plugin starts.
+_http_stack: Optional[tuple] = None
+_http_stack_lock = threading.Lock()
+
+
+def _http() -> tuple:
+    """(urllib.request, urllib.error, SSL context), created on first use."""
+    global _http_stack
+    if _http_stack is None:
+        with _http_stack_lock:
+            if _http_stack is None:
+                import urllib.error
+                import urllib.request
+
+                _http_stack = (urllib.request, urllib.error, _build_ssl_context())
+    return _http_stack
+
+
+def _new_request(url: str, data=None, method=None, headers=None):
+    return _http()[0].Request(url, data=data, method=method, headers=headers or {})
+
+
+def _urlopen(req, timeout: int):
+    request_module, _, ssl_context = _http()
+    return request_module.urlopen(req, timeout=timeout, context=ssl_context)
+
+
+def _http_error():
+    return _http()[1].HTTPError
 
 
 def _http_post_form(url: str, fields: dict) -> dict:
     """Blocking form-encoded POST with a JSON response. Always run via an executor."""
     data = urllib.parse.urlencode(fields).encode("ascii")
-    req = urllib.request.Request(url, data=data, method="POST")
+    req = _new_request(url, data=data, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as resp:
+        with _urlopen(req, 15) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
+    except _http_error() as e:
         body = e.read().decode("utf-8", errors="ignore")
         try:
             return json.loads(body)
@@ -557,15 +655,15 @@ def _http_post_form(url: str, fields: dict) -> dict:
 def _http_json_request(url: str, method: str, payload: Optional[dict], access_token: str) -> dict:
     """Blocking JSON request against the Drive API (search/create folder calls)."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
+    req = _new_request(url, data=data, method=method, headers={
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     })
     try:
-        with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as resp:
+        with _urlopen(req, 15) as resp:
             body = resp.read()
             return json.loads(body) if body else {}
-    except urllib.error.HTTPError as e:
+    except _http_error() as e:
         body = e.read().decode("utf-8", errors="ignore")
         try:
             return json.loads(body)
@@ -679,7 +777,7 @@ def _upload_file_to_drive(access_token: str, path: str, folder_id: Optional[str]
         + f"\r\n--{boundary}--".encode("utf-8")
     )
 
-    req = urllib.request.Request(
+    req = _new_request(
         GOOGLE_UPLOAD_URL,
         data=body,
         method="POST",
@@ -689,10 +787,10 @@ def _upload_file_to_drive(access_token: str, path: str, folder_id: Optional[str]
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=30, context=_SSL_CONTEXT) as resp:
+        with _urlopen(req, 30) as resp:
             resp.read()
         return {"ok": True, "error": None}
-    except urllib.error.HTTPError as e:
+    except _http_error() as e:
         decky.logger.warning(f"Google Drive upload failed ({e.code}): {e.read().decode('utf-8', errors='ignore')}")
         return {"ok": False, "error": "upload_failed"}
     except OSError as e:
@@ -884,11 +982,11 @@ def _discord_request(
         data = body
         if content_type:
             headers["Content-Type"] = content_type
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    req = _new_request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=30, context=_SSL_CONTEXT) as resp:
+        with _urlopen(req, 30) as resp:
             raw, status = resp.read(), resp.status
-    except urllib.error.HTTPError as e:
+    except _http_error() as e:
         raw, status = e.read(), e.code
     except OSError as e:
         return 0, {"error": str(e)}
@@ -1248,16 +1346,26 @@ def _clamp_auto_upload_delay(value) -> int:
 
 
 class _AutoUploader:
+    """Notices new screenshots for the Google Drive / Discord auto-upload.
+
+    While neither toggle is on it does nothing but read the settings file:
+    no folder is scanned at all. Once one is on, each check asks the shared
+    screenshot index (which only re-reads folders that changed) for entries
+    newer than a watermark, so the cost doesn't depend on library size."""
+
     def __init__(self) -> None:
         self._task: Optional[asyncio.Task] = None
-        self._seen: set = set()
+        # Modified time of the newest screenshot when watching began. Only
+        # files newer than this count as "new": existing ones are never
+        # uploaded, and neither are ones dropped in with an old timestamp.
+        self._watermark: Optional[float] = None
         # path -> {"first_seen": monotonic time, "size": latest size,
         #          "prev_size": size at the previous check, "done": services handled}
         self._pending: dict = {}
 
     async def start(self) -> None:
         await self.stop()
-        self._seen = {item["path"] for item in await _run_blocking(_list_steam_screenshots)}
+        self._watermark = None
         self._pending = {}
         self._task = asyncio.get_event_loop().create_task(self._run())
 
@@ -1277,21 +1385,38 @@ class _AutoUploader:
                 decky.logger.warning(f"Auto-upload: tick failed: {e!r}")
 
     async def _tick(self) -> None:
-        now = time.monotonic()
         settings = _load_settings()
-        sizes = {item["path"]: item["size"] for item in await _run_blocking(_list_steam_screenshots)}
+        active = any(settings.get(toggle_key) for _, toggle_key, _ in _AUTO_UPLOAD_SERVICES)
+        if not active and not self._pending:
+            # Idle: scan nothing. A fresh baseline is taken when a toggle is switched on.
+            self._watermark = None
+            return
 
-        for path, size in sizes.items():
-            if path not in self._seen:
-                self._seen.add(path)
-                self._pending[path] = {"first_seen": now, "size": size, "prev_size": None, "done": set()}
+        now = time.monotonic()
+        if active:
+            entries, _ = await _run_blocking(_screenshot_index.snapshot)
+            if self._watermark is None:
+                self._watermark = entries[0][_IDX_MODIFIED] if entries else time.time()
+            else:
+                newest = self._watermark
+                for entry in entries:  # newest first
+                    if entry[_IDX_MODIFIED] <= self._watermark:
+                        break
+                    newest = max(newest, entry[_IDX_MODIFIED])
+                    if entry[_IDX_PATH] not in self._pending:
+                        self._pending[entry[_IDX_PATH]] = {
+                            "first_seen": now, "size": entry[_IDX_SIZE], "prev_size": None, "done": set(),
+                        }
+                self._watermark = newest
 
         for path in list(self._pending):
             entry = self._pending[path]
-            if path not in sizes:
+            try:
+                size = os.path.getsize(path)
+            except OSError:
                 del self._pending[path]  # deleted (by the user or storage auto-delete) before its turn
                 continue
-            entry["prev_size"], entry["size"] = entry["size"], sizes[path]
+            entry["prev_size"], entry["size"] = entry["size"], size
             still_being_written = entry["size"] != entry["prev_size"]
 
             for service, toggle_key, delay_key in _AUTO_UPLOAD_SERVICES:
@@ -1344,7 +1469,7 @@ class Plugin:
 
         await _enforce_auto_delete(_load_settings())
         await _check_storage_alerts()
-        all_items = _list_steam_screenshots()
+        all_items, _ = _screenshot_index.snapshot()
         total = len(all_items)
         page_items = all_items[offset:offset + limit]
 
@@ -1352,14 +1477,14 @@ class Plugin:
         for entry in page_items:
             try:
                 items.append({
-                    "filename": entry["filename"],
-                    "path": entry["path"],
-                    "appName": _resolve_app_name(entry["appid"]),
-                    "modified": entry["modified"],
-                    "thumbnail": _file_to_data_uri(entry["thumbnail_path"]),
+                    "filename": os.path.basename(entry[_IDX_PATH]),
+                    "path": entry[_IDX_PATH],
+                    "appName": _resolve_app_name(entry[_IDX_APPID]),
+                    "modified": entry[_IDX_MODIFIED],
+                    "thumbnail": _file_to_data_uri(_thumbnail_path(entry)),
                 })
             except OSError as e:
-                decky.logger.warning(f"Could not process {entry['path']}: {e}")
+                decky.logger.warning(f"Could not process {entry[_IDX_PATH]}: {e}")
 
         return {"total": total, "offset": offset, "limit": limit, "items": items}
 
@@ -1381,6 +1506,21 @@ class Plugin:
         # entry on its next scan, same as deleting the file from a file
         # manager would.
         return _delete_screenshot_files(real)
+
+    async def get_steam_auto_upload_config(self) -> dict:
+        """Just the Steam auto-upload preferences. The full get_settings() also
+        checks storage and alerts, which is more than the frontend needs each
+        time a screenshot is taken."""
+        settings = _load_settings()
+        return {
+            "auto_upload_steam": bool(settings.get("auto_upload_steam")),
+            "auto_upload_delay_steam": _clamp_auto_upload_delay(settings.get("auto_upload_delay_steam")),
+            "steam_upload_privacy": (
+                settings["steam_upload_privacy"]
+                if settings.get("steam_upload_privacy") in STEAM_UPLOAD_PRIVACY_VALUES
+                else DEFAULT_SETTINGS["steam_upload_privacy"]
+            ),
+        }
 
     async def get_settings(self) -> dict:
         settings = _load_settings()

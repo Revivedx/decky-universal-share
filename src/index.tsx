@@ -55,6 +55,14 @@ interface Settings {
   account_detected: boolean;
 }
 
+// The few settings the Steam upload needs; fetching just these avoids the
+// full get_settings() (which also runs the storage checks) for every screenshot.
+interface SteamAutoUploadConfig {
+  auto_upload_steam: boolean;
+  auto_upload_delay_steam: number;
+  steam_upload_privacy: number;
+}
+
 interface ShareResult {
   url: string | null;
   error: "invalid_path" | "server_failed" | null;
@@ -106,6 +114,7 @@ const getScreenshotImage = callable<[path: string], string | null>("get_screensh
 const deleteScreenshot = callable<[path: string], boolean>("delete_screenshot");
 const getSettings = callable<[], Settings>("get_settings");
 const setSettings = callable<[settings: Partial<Settings>], Settings>("set_settings");
+const getSteamAutoUploadConfig = callable<[], SteamAutoUploadConfig>("get_steam_auto_upload_config");
 const startQrShare = callable<[path: string, durationSeconds: number], ShareResult>("start_qr_share");
 const stopQrShare = callable<[], void>("stop_qr_share");
 const getGoogleDriveStatus = callable<[], GoogleDriveStatus>("google_drive_status");
@@ -980,8 +989,8 @@ function PreviewModalContent({
       return;
     }
     if (option.data === "steam") {
-      const settings = await getSettings();
-      await shareToSteamAccount(item, settings.steam_upload_privacy);
+      const config = await getSteamAutoUploadConfig();
+      await shareToSteamAccount(item, config.steam_upload_privacy);
       return;
     }
     if (option.data === "steamfriend") {
@@ -1189,6 +1198,38 @@ function Gallery() {
   );
 }
 
+const SETTINGS_SAVE_DELAY_MS = 400;
+
+// The UI updates instantly, but the backend is only told once the user pauses.
+// Saving on every step of a slider drag made the backend run a full settings
+// save (plus its storage checks) for each tick of the drag.
+function useSettingsUpdater(settings: Settings | undefined, setLocalSettings: (settings: Settings) => void) {
+  const latest = useRef<Settings | undefined>(settings);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // While a save is pending, `latest` holds the newest local edit; don't let a re-render overwrite it.
+  if (!timer.current) latest.current = settings;
+
+  return useCallback(
+    (patch: Partial<Settings>) => {
+      if (!latest.current) return;
+      const next = { ...latest.current, ...patch };
+      latest.current = next;
+      setLocalSettings(next);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(async () => {
+        timer.current = undefined;
+        const saved = await setSettings(next);
+        // Adopt the backend's answer only if nothing was changed while saving.
+        if (!timer.current) {
+          latest.current = saved;
+          setLocalSettings(saved);
+        }
+      }, SETTINGS_SAVE_DELAY_MS);
+    },
+    [setLocalSettings]
+  );
+}
+
 function StoragePanel() {
   const [expanded, setExpanded] = useState(false);
   const [settings, setLocalSettings] = useState<Settings | undefined>();
@@ -1231,13 +1272,7 @@ function StoragePanel() {
     return () => removeEventListener("storage_threshold_reached", listener);
   }, [refresh]);
 
-  const update = async (patch: Partial<Settings>) => {
-    if (!settings) return;
-    const next = { ...settings, ...patch };
-    setLocalSettings(next); // immediate feedback in the UI
-    const saved = await setSettings(next);
-    setLocalSettings(saved);
-  };
+  const update = useSettingsUpdater(settings, setLocalSettings);
 
   const isUnlimited = settings?.max_storage_mb === STORAGE_LIMIT_UNLIMITED;
   const usedPct = settings && !isUnlimited && settings.max_storage_mb > 0 ? (settings.used_mb / settings.max_storage_mb) * 100 : 0;
@@ -1395,13 +1430,7 @@ function ShareOptionsPanel() {
     refreshDiscordStatus();
   }, [refreshDriveStatus, refreshDiscordStatus]);
 
-  const update = async (patch: Partial<Settings>) => {
-    if (!settings) return;
-    const next = { ...settings, ...patch };
-    setLocalSettings(next); // immediate feedback in the UI
-    const saved = await setSettings(next);
-    setLocalSettings(saved);
-  };
+  const update = useSettingsUpdater(settings, setLocalSettings);
 
   const onUnlinkDrive = async () => {
     setUnlinking(true);
@@ -1593,11 +1622,11 @@ async function autoUploadNewSteamScreenshot(appId: number, handle: number): Prom
   if (steamAutoUploadHandled.has(key)) return;
   steamAutoUploadHandled.add(key);
   try {
-    const first = await getSettings();
+    const first = await getSteamAutoUploadConfig();
     if (!first.auto_upload_steam) return;
     await sleep(first.auto_upload_delay_steam * 1000);
     // The toggle is checked again after the wait, so switching it off in that window cancels the upload.
-    const current = await getSettings();
+    const current = await getSteamAutoUploadConfig();
     if (!current.auto_upload_steam) return;
     const shot = (await listSteamScreenshots()).find((s) => s.nAppID === appId && s.hHandle === handle);
     if (!shot || shot.bUploaded) return; // deleted meanwhile, or already up
