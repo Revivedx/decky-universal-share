@@ -406,6 +406,8 @@ function openGoogleDriveLinkModal(onLinked: () => void) {
 // password here means someone who picks up an already-unlocked Deck can't
 // silently link their own Google account on it. The password is sent once,
 // straight to sudo's stdin on the backend, and is never logged or stored.
+const NATIVE_PASSWORD_PROPS = { type: "password" };
+
 function LinkConfirmModal({
   service,
   detail,
@@ -451,12 +453,13 @@ function LinkConfirmModal({
             HTML `type="password"` is forced through too -- TextFieldProps'
             declared type doesn't include `type` (it extends the generic
             HTMLAttributes, not InputHTMLAttributes), but the underlying
-            element is a real <input>, so this still reaches it. This causes
-            a harmless TS2322 build warning (not a build failure) since
-            `type` isn't part of the declared prop type. */}
+            element is a real <input>, so this still reaches it. It's passed
+            as a spread (NATIVE_PASSWORD_PROPS) because TypeScript doesn't
+            excess-property-check spread attributes, which avoids a TS2322
+            error for a prop that isn't in the declared type. */}
         <TextField
           bIsPassword
-          type="password"
+          {...NATIVE_PASSWORD_PROPS}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => {
