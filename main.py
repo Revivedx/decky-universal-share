@@ -1067,6 +1067,37 @@ def _upload_file_to_discord(webhook_url: str, path: str, content: str) -> dict:
     return {"ok": False, "error": "upload_failed"}
 
 
+async def _upload_screenshot_to_drive(real: str) -> dict:
+    """`real` must already be validated with _is_inside_steam_screenshots."""
+    access_token = await _get_google_access_token()
+    if access_token is None:
+        return {"ok": False, "error": "not_linked"}
+
+    appid = _extract_appid_from_screenshot_path(real) or "7"
+    folder_id = await _get_drive_game_folder_id(access_token, appid)
+    if folder_id:
+        already_there = await _run_blocking(_drive_file_exists, access_token, os.path.basename(real), folder_id)
+        if already_there:
+            return {"ok": False, "error": "duplicate"}
+
+    return await _run_blocking(_upload_file_to_drive, access_token, real, folder_id)
+
+
+async def _upload_screenshot_to_discord(real: str) -> dict:
+    """`real` must already be validated with _is_inside_steam_screenshots."""
+    webhook_url = _discord_webhook_url()
+    if webhook_url is None:
+        return {"ok": False, "error": "not_linked"}
+
+    appid = _extract_appid_from_screenshot_path(real) or "7"
+    result = await _run_blocking(
+        _upload_file_to_discord, webhook_url, real, f"**{_resolve_drive_folder_name(appid)}**"
+    )
+    if result.get("error") == "not_linked":
+        _delete_file_quietly(DISCORD_TOKEN_PATH)  # webhook no longer exists; drop the stale link
+    return result
+
+
 # --- Settings -----------------------------------------------------------------
 
 SETTINGS_PATH = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "config.json")
@@ -1079,6 +1110,10 @@ DEFAULT_SETTINGS = {
     "max_storage_mb": 2048,
     "auto_delete": False,
     "qr_share_duration_seconds": SHARE_DEFAULT_DURATION_SECONDS,
+    # Opt-in, and only offered once the matching service is linked. Each new
+    # screenshot is uploaded automatically shortly after it's taken.
+    "auto_upload_google_drive": False,
+    "auto_upload_discord": False,
 }
 
 
@@ -1119,7 +1154,108 @@ def _validate_settings(raw: dict) -> dict:
         "max_storage_mb": max_storage_mb,
         "auto_delete": auto_delete,
         "qr_share_duration_seconds": max(30, min(3600, qr_share_duration_seconds)),
+        "auto_upload_google_drive": bool(
+            raw.get("auto_upload_google_drive", DEFAULT_SETTINGS["auto_upload_google_drive"])
+        ),
+        "auto_upload_discord": bool(raw.get("auto_upload_discord", DEFAULT_SETTINGS["auto_upload_discord"])),
     }
+
+
+def _disable_auto_upload(setting_key: str) -> None:
+    """Turns an auto-upload toggle off (used when its service is unlinked)."""
+    settings = _load_settings()
+    if settings.get(setting_key):
+        settings[setting_key] = False
+        _save_settings(settings)
+
+
+# --- Auto-upload of new screenshots ---------------------------------------------
+#
+# Steam gives no "screenshot taken" hook to a plugin, so new files are found
+# by polling the screenshots folders. Screenshots that already exist when the
+# plugin starts are only remembered, never uploaded (turning this on must not
+# dump the whole existing library into someone's Drive/Discord), and ones
+# taken while the plugin isn't running are never picked up. Each new file
+# waits AUTO_UPLOAD_DELAY_SECONDS (also lets Steam finish writing it), and the
+# toggles are read again at upload time, so switching one off during that
+# window cancels the upload.
+
+AUTO_UPLOAD_DELAY_SECONDS = 30
+AUTO_UPLOAD_POLL_SECONDS = 5
+
+
+class _AutoUploader:
+    def __init__(self) -> None:
+        self._task: Optional[asyncio.Task] = None
+        self._seen: set = set()
+        # path -> [due monotonic time, size when first seen]
+        self._pending: dict = {}
+
+    async def start(self) -> None:
+        await self.stop()
+        self._seen = {item["path"] for item in await _run_blocking(_list_steam_screenshots)}
+        self._pending = {}
+        self._task = asyncio.get_event_loop().create_task(self._run())
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    async def _run(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(AUTO_UPLOAD_POLL_SECONDS)
+                await self._tick()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # a bad tick must never kill the watcher
+                decky.logger.warning(f"Auto-upload: tick failed: {e!r}")
+
+    async def _tick(self) -> None:
+        now = time.monotonic()
+        for item in await _run_blocking(_list_steam_screenshots):
+            if item["path"] not in self._seen:
+                self._seen.add(item["path"])
+                self._pending[item["path"]] = [now + AUTO_UPLOAD_DELAY_SECONDS, item["size"]]
+
+        for path in [p for p, (due, _) in self._pending.items() if due <= now]:
+            _, first_size = self._pending.pop(path)
+            try:
+                size_now = os.path.getsize(path)
+            except OSError:
+                continue  # deleted (e.g. by the user or the storage auto-delete) before its turn
+            if size_now != first_size:
+                # Still being written; look again on the next round.
+                self._pending[path] = [now + AUTO_UPLOAD_POLL_SECONDS, size_now]
+                continue
+            await self._upload(path)
+
+    async def _upload(self, path: str) -> None:
+        real = _is_inside_steam_screenshots(path)
+        if real is None:
+            return
+        settings = _load_settings()
+        filename = os.path.basename(real)
+        jobs = []
+        if GOOGLE_DRIVE_ENABLED and settings.get("auto_upload_google_drive") and _load_google_token() is not None:
+            jobs.append(("Google Drive", _upload_screenshot_to_drive))
+        if DISCORD_ENABLED and settings.get("auto_upload_discord") and _discord_webhook_url() is not None:
+            jobs.append(("Discord", _upload_screenshot_to_discord))
+
+        for service, upload in jobs:
+            result = await upload(real)
+            error = result.get("error")
+            if result.get("ok"):
+                decky.logger.info(f"Auto-upload: {filename} sent to {service}.")
+            elif error == "duplicate":
+                continue  # already there; nothing worth telling the user
+            else:
+                decky.logger.warning(f"Auto-upload: {filename} to {service} failed ({error}).")
+            await decky.emit("auto_upload_result", service, filename, bool(result.get("ok")), error)
+
+
+_auto_uploader = _AutoUploader()
 
 
 class Plugin:
@@ -1181,6 +1317,11 @@ class Plugin:
 
     async def set_settings(self, new_settings: dict) -> dict:
         validated = _validate_settings(new_settings)
+        # An auto-upload toggle can't be on for a service that isn't linked.
+        if _load_google_token() is None:
+            validated["auto_upload_google_drive"] = False
+        if _discord_webhook_url() is None:
+            validated["auto_upload_discord"] = False
         # Preserve internal bookkeeping (e.g. which storage alert threshold
         # was last fired) that isn't part of the user-editable settings the
         # frontend sends, so saving a setting doesn't wipe it and cause a
@@ -1290,6 +1431,7 @@ class Plugin:
         if token_data:
             await _run_blocking(_http_post_form, GOOGLE_REVOKE_URL, {"token": token_data["refresh_token"]})
         _delete_google_token()
+        _disable_auto_upload("auto_upload_google_drive")
 
     async def upload_screenshot_to_drive(self, path: str) -> dict:
         if not GOOGLE_DRIVE_ENABLED:
@@ -1298,19 +1440,7 @@ class Plugin:
         if real is None or not os.path.isfile(real):
             decky.logger.warning(f"Invalid path when uploading to Drive: {path}")
             return {"ok": False, "error": "invalid_path"}
-
-        access_token = await _get_google_access_token()
-        if access_token is None:
-            return {"ok": False, "error": "not_linked"}
-
-        appid = _extract_appid_from_screenshot_path(real) or "7"
-        folder_id = await _get_drive_game_folder_id(access_token, appid)
-        if folder_id:
-            already_there = await _run_blocking(_drive_file_exists, access_token, os.path.basename(real), folder_id)
-            if already_there:
-                return {"ok": False, "error": "duplicate"}
-
-        return await _run_blocking(_upload_file_to_drive, access_token, real, folder_id)
+        return await _upload_screenshot_to_drive(real)
 
     async def discord_status(self) -> dict:
         if not DISCORD_ENABLED:
@@ -1348,6 +1478,7 @@ class Plugin:
             # failure (e.g. already deleted) is fine, the local copy goes anyway.
             await _run_blocking(_discord_request, url, "DELETE")
         _delete_file_quietly(DISCORD_TOKEN_PATH)
+        _disable_auto_upload("auto_upload_discord")
 
     async def upload_screenshot_to_discord(self, path: str) -> dict:
         if not DISCORD_ENABLED:
@@ -1356,18 +1487,7 @@ class Plugin:
         if real is None or not os.path.isfile(real):
             decky.logger.warning(f"Invalid path when uploading to Discord: {path}")
             return {"ok": False, "error": "invalid_path"}
-
-        webhook_url = _discord_webhook_url()
-        if webhook_url is None:
-            return {"ok": False, "error": "not_linked"}
-
-        appid = _extract_appid_from_screenshot_path(real) or "7"
-        result = await _run_blocking(
-            _upload_file_to_discord, webhook_url, real, f"**{_resolve_drive_folder_name(appid)}**"
-        )
-        if result.get("error") == "not_linked":
-            _delete_file_quietly(DISCORD_TOKEN_PATH)  # webhook no longer exists; drop the stale link
-        return result
+        return await _upload_screenshot_to_discord(real)
 
     async def _main(self) -> None:
         decky.logger.info("Omni-Revi-Transfer started (indexing Steam's native screenshots).")
@@ -1386,8 +1506,10 @@ class Plugin:
             decky.logger.warning("Could not detect the Steam account under userdata/.")
         else:
             decky.logger.info(f"Steam account detected: {account_id}")
+        await _auto_uploader.start()
 
     async def _unload(self) -> None:
+        await _auto_uploader.stop()
         await _share_server.stop()
         await _discord_link_server.stop()
         decky.logger.info("Omni-Revi-Transfer stopped.")

@@ -43,6 +43,8 @@ interface Settings {
   max_storage_mb: number;
   auto_delete: boolean;
   qr_share_duration_seconds: number;
+  auto_upload_google_drive: boolean;
+  auto_upload_discord: boolean;
   used_mb: number;
   over_limit: boolean;
   account_detected: boolean;
@@ -1050,6 +1052,8 @@ function ShareOptionsPanel() {
       await unlinkGoogleDrive();
       toaster.toast({ title: "Google Drive unlinked", body: "Access has been revoked." });
       refreshDriveStatus();
+      getSettings().then(setLocalSettings); // the backend switches its auto-upload off
+
     } finally {
       setUnlinking(false);
     }
@@ -1061,6 +1065,7 @@ function ShareOptionsPanel() {
       await unlinkDiscord();
       toaster.toast({ title: "Discord unlinked", body: "The webhook was deleted." });
       refreshDiscordStatus();
+      getSettings().then(setLocalSettings); // the backend switches its auto-upload off
     } finally {
       setUnlinkingDiscord(false);
     }
@@ -1104,6 +1109,17 @@ function ShareOptionsPanel() {
         </PanelSectionRow>
       )}
 
+      {expanded && GOOGLE_DRIVE_ENABLED && driveLinked && settings && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Auto-upload to Google Drive"
+            description="Uploads each new screenshot about 30 seconds after you take it, without asking. Anything in your screenshots gets uploaded, so leave this off if that's a concern."
+            checked={settings.auto_upload_google_drive}
+            onChange={(value) => update({ auto_upload_google_drive: value })}
+          />
+        </PanelSectionRow>
+      )}
+
       {expanded && DISCORD_ENABLED && (
         <PanelSectionRow>
           {discordLinked ? (
@@ -1119,6 +1135,17 @@ function ShareOptionsPanel() {
               Link Discord
             </ButtonItem>
           )}
+        </PanelSectionRow>
+      )}
+
+      {expanded && DISCORD_ENABLED && discordLinked && settings && (
+        <PanelSectionRow>
+          <ToggleField
+            label="Auto-upload to Discord"
+            description="Posts each new screenshot to your linked channel about 30 seconds after you take it, without asking. Anyone in that channel will see it."
+            checked={settings.auto_upload_discord}
+            onChange={(value) => update({ auto_upload_discord: value })}
+          />
         </PanelSectionRow>
       )}
     </PanelSection>
@@ -1138,11 +1165,32 @@ function Content() {
 export default definePlugin(() => {
   console.log("Omni-Revi-Transfer initializing")
 
+  // Registered here, not inside a component: auto-uploads happen in the
+  // background while the quick access menu is closed, and the toast must
+  // still show up then.
+  const autoUploadListener = addEventListener<[service: string, filename: string, ok: boolean, error: string | null]>(
+    "auto_upload_result",
+    (service, filename, ok, error) => {
+      if (ok) {
+        toaster.toast({ title: `Auto-uploaded to ${service}`, body: filename });
+      } else {
+        const reason =
+          error === "not_linked" ? "The link is no longer valid. Link it again from Share options."
+          : error === "too_large" ? "The file is over the upload limit."
+          : error === "rate_limited" ? "Rate limited; it won't be retried."
+          : "Check the plugin log for details.";
+        toaster.toast({ title: `Auto-upload to ${service} failed`, body: `${filename}: ${reason}` });
+      }
+    }
+  );
+
   return {
     name: "Omni-Revi-Transfer",
     titleView: <div className={staticClasses.Title}>Omni-Revi-Transfer</div>,
     content: <Content />,
     icon: <FaCamera />,
-    onDismount() {},
+    onDismount() {
+      removeEventListener("auto_upload_result", autoUploadListener);
+    },
   };
 });

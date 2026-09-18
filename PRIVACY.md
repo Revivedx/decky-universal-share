@@ -45,6 +45,10 @@ Omni-Revi-Transfer optionally lets a user post a screenshot to a Discord channel
 - **What we upload:** only the screenshot the user explicitly chooses to send, plus its game name as the message text, directly from the Deck to Discord.
 - **Revoking access:** "Unlink Discord" deletes the webhook on Discord and the local copy. The user can also delete the webhook at any time in the channel's Integrations settings, or remove the app under Discord's Authorized Apps.
 
+## Optional automatic upload
+
+For each linked service (Google Drive, Discord) the user can turn on an "Auto-upload" setting, **off by default**. While it is on, each new screenshot taken while the plugin is running is uploaded to that service about 30 seconds after it is taken, without a per-screenshot confirmation. Screenshots that existed before the setting was turned on are never uploaded automatically. The setting can be switched off at any time, and unlinking a service switches it off. Uploads go directly from the user's Deck to the chosen service, as described in the sections above; nothing is sent to the developer.
+
 ## Data retention and deletion
 
 - Screenshots are retained exactly as long as the user keeps them in Steam's own screenshots folder (or, in Google Drive, in the user's own Drive) — the plugin does not impose its own retention policy beyond the user's own configured, opt-in "auto-delete when over a storage limit" setting, which is off by default.
