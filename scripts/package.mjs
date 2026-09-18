@@ -40,10 +40,22 @@ const zipPath = path.join(releaseDir, `decky-universal-share-v${version}.zip`);
 // Files that must exist for the plugin to install and run at all.
 const requiredFiles = ["dist/index.js", "package.json", "plugin.json", "main.py"];
 // Nice-to-have files Decky's own docs recommend including alongside a submission.
-// google_credentials.json is gitignored (see .gitignore) and only present
-// locally -- included here (if present) so main.py can load it next to
-// itself once GOOGLE_DRIVE_ENABLED is flipped back on for a release.
-const optionalFiles = ["README.md", "LICENSE", "google_credentials.json"];
+const optionalFiles = ["README.md", "LICENSE"];
+
+// google_credentials.json holds the real Google OAuth client id/secret and is
+// gitignored -- it must NOT ride along in a public release zip while the
+// Google Drive feature is disabled (GOOGLE_DRIVE_ENABLED = False in main.py):
+// that would leak the secret via the distributed artifact even though it's
+// kept out of git. Only bundle it once the feature is actually turned back
+// on, at which point every user's install legitimately needs it (this is a
+// single shared "installed app" OAuth client, not a per-user secret).
+const mainPySource = readFileSync(path.join(rootDir, "main.py"), "utf-8");
+const googleDriveEnabled = /GOOGLE_DRIVE_ENABLED\s*=\s*True/.test(mainPySource);
+if (googleDriveEnabled) {
+  optionalFiles.push("google_credentials.json");
+} else {
+  console.log("  GOOGLE_DRIVE_ENABLED is False: google_credentials.json will NOT be bundled in this zip.");
+}
 
 function assertBuilt() {
   const missing = requiredFiles.filter((f) => !existsSync(path.join(rootDir, f)));

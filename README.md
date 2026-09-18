@@ -1,5 +1,7 @@
 # Decky Universal Share
 
+**Version 0.0.5a**
+
 A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck that turns the screenshots Steam already takes natively (Steam button + R1/RB) into a browsable, manageable, shareable gallery — right from the Quick Access Menu.
 
 ## Installing (no build tools needed)
@@ -15,9 +17,10 @@ A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for t
 - **Preview**: tapping a screenshot opens a full-resolution preview with **Share** and **Delete** actions.
 - **Delete**: removes the screenshot file and its cached thumbnail. (Steam's own `760/screenshots.vdf` index isn't touched — Steam tolerates manually removed files and prunes the stale entry on its next scan, same as deleting the file from a file manager would.)
 - **Share via QR**: starts a local, LAN-only HTTP server that serves *only* the selected screenshot, and shows a QR code (generated 100% locally — no third-party service involved) that a phone on the same Wi-Fi can scan to download it. See [Security notes](#security-notes-for-share-via-qr) below for how this is hardened.
-- **Share menu placeholders**: the Share dropdown also lists "iCloud" and "Google Drive" as future options. They currently only show a "Coming soon" toast — no integration exists yet.
-- **Storage panel**: a collapsible summary showing how much space Steam's screenshots are using, with a configurable warning limit (0.5–50 GB). Exceeding it only shows a warning — it never blocks Steam from saving a new screenshot (the plugin doesn't control that). There's an opt-in, **off-by-default** "auto-delete oldest when over limit" toggle for anyone who wants that risk; its description explicitly warns that it permanently deletes screenshots from *any* game without asking.
-- **Share options panel**: lets you configure how long a "Share via QR" link stays active before expiring on its own (1/5/10/30 minutes).
+- **Share menu placeholders**: the Share dropdown also lists "iCloud" as a future option. It currently only shows a "Coming soon" toast — no integration exists yet.
+- **Google Drive upload** *(currently disabled — see [Google Drive status](#google-drive-status) below)*: uploads a screenshot to the user's own Google Drive, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game), with duplicate detection so re-uploading the same file is a no-op. Linking requires confirming the Deck's own sudo password first (see [Security notes for Google Drive](#security-notes-for-google-drive) below).
+- **Storage panel**: a collapsible summary showing how much space Steam's screenshots are using, with a configurable warning limit (0.5–50 GB, or Unlimited). Exceeding it only shows a warning — it never blocks Steam from saving a new screenshot (the plugin doesn't control that). Alerts fire once per threshold crossing at 80/90/100% usage. There's an opt-in, **off-by-default** "auto-delete oldest when over limit" toggle for anyone who wants that risk; its description explicitly warns that it permanently deletes screenshots from *any* game without asking (and is automatically disabled when the limit is set to Unlimited).
+- **Share options panel**: lets you configure how long a "Share via QR" link stays active before expiring on its own (1/5/10/30 minutes), and (once re-enabled) link/unlink Google Drive.
 
 ## Why it works this way (design decisions worth knowing)
 
@@ -28,6 +31,10 @@ A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for t
 - **The Steam account (and its screenshot folder) is auto-detected**, not configured by hand. `userdata/<accountID>/760/remote/` is located by scanning `userdata/` (single-account fast path) or by parsing `config/loginusers.vdf` for multi-account setups, converting the account's SteamID64 to its 32-bit folder name.
 - **The QR-sharing HTTP server is hand-rolled on top of `asyncio`**, not `http.server`/`socketserver`/`wsgiref`. Those modules are simply not present in the packaged Python that Decky Loader uses to run plugin backends (confirmed on-device: `ModuleNotFoundError`, even for `wsgiref.simple_server`, which itself depends on `http.server`). `socket` and `asyncio` are available, so the server implements the bare minimum HTTP GET handling needed.
 - **Modals use `ModalRoot`, not `ConfirmModal`.** `ConfirmModal` always renders its own OK/Cancel button pair with no documented way to hide either one, and — the actual bug that took a few rounds to track down — it does **not** close itself when those buttons are pressed; the caller has to explicitly call the `.Close()` handle that `showModal()` returns. `ModalRoot` forces no buttons at all, letting the content define exactly which actions exist (Share, Delete, Stop sharing), while its `onCancel` prop is what the controller's B button fires.
+
+## Google Drive status
+
+Google Drive linking is currently **disabled** (`GOOGLE_DRIVE_ENABLED = False` in `main.py`, mirrored in `src/index.tsx`), even though the full integration is implemented and was tested end-to-end against a real Google account. This is temporary: Google's OAuth app is still in "Testing" publishing status, which caps usage at 100 manually-approved test users and issues sessions that expire after 7 days — not viable for a public release. The app is going through Google's verification process (see `PRIVACY.md`) so it can move to "In production" with no user cap and normal-lifetime sessions. Both flags will be flipped back on once that's approved; nothing about the integration needs to change.
 
 ## Security notes (for "Share via QR")
 
@@ -40,6 +47,17 @@ The local share server has no authentication or TLS, so it's hardened deliberate
 
 This does mean: while a share is active, anyone else on the same network who somehow obtained the exact URL could also download that one file — treat it like a temporary, one-time link, same as you would with any quick file-share tool on a home network.
 
+## Security notes (for Google Drive)
+
+Full details live in `PRIVACY.md`, but in short:
+
+- Only the [`drive.file`](https://developers.google.com/drive/api/guides/api-specific-auth) scope is requested — the plugin can only see/create files it uploads itself, never browse the rest of the user's Drive.
+- Linking uses Google's OAuth **device flow**: the user approves on their own phone/browser by scanning a QR code, never by typing a password into the plugin.
+- The resulting refresh token is stored **locally on the Deck only**, inside the plugin's own settings folder, and is **obfuscated at rest** (XOR'd with a key derived from the device's own `/etc/machine-id`, base64-encoded) — this is explicitly *obfuscation, not real encryption*. It raises the bar against casual/accidental exposure (e.g. someone `cat`-ing the file out of curiosity) but would not stop someone with root access to a compromised Deck from reversing it, since the process itself must be able to decrypt it with no human input. This limitation is disclosed to the user, not hidden.
+- Before starting the link flow, the plugin requires the user to re-enter **this Deck's own sudo password** (verified via `sudo -k -S -v`, never logged, piped straight to stdin so it never appears in `ps`) as a step-up confirmation — so someone who picks up an already-unlocked Deck can't silently link their own Google account to it. The risk of the obfuscated (not encrypted) token is disclosed on that same screen before the password prompt.
+- Unlinking revokes the token with Google directly and deletes the local file — equivalent to removing the app from your [Google Account's connected apps list](https://myaccount.google.com/permissions).
+- The OAuth client ID/secret are not committed to this repo (see `google_credentials.example.json` for the expected shape) — GitHub's own secret scanning flags OAuth client secrets in public repos, so they're loaded at runtime from a gitignored `google_credentials.json` instead.
+
 ## Dependencies
 
 **Runtime (bundled into `dist/index.js`):**
@@ -51,7 +69,7 @@ This does mean: while a share is active, anyone else on the same network who som
 | [`qrcode-generator`](https://www.npmjs.com/package/qrcode-generator) | Fully local, dependency-free QR code rendering |
 | `tslib` | TypeScript helper runtime |
 
-**Backend:** Python standard library only (`asyncio`, `socket`, `secrets`, `shutil`, `json`, `re`, `base64`, `urllib.parse`) plus the `decky` module Decky Loader itself provides. No pip packages are vendored.
+**Backend:** Python standard library only (`asyncio`, `socket`, `secrets`, `shutil`, `json`, `re`, `base64`, `hashlib`, `ssl`, `urllib.request`/`urllib.parse`) plus the `decky` module Decky Loader itself provides. No pip packages are vendored.
 
 **Dev tooling:**
 | Package | Why |
@@ -69,6 +87,7 @@ This repo's deploy path is custom (built while developing on Windows against a p
    ```json
    { "deckIP": "192.168.x.x", "deckPort": "22", "deckUser": "deck", "deckPass": "..." }
    ```
+1a. (Only needed while working on the Google Drive integration itself) copy `google_credentials.example.json` to `google_credentials.json` (gitignored) and fill in a real OAuth client id/secret. Not required otherwise — `GOOGLE_DRIVE_ENABLED = False` means it's never read.
 2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
 3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
 4. `npm run package` — builds the frontend and produces `release/decky-universal-share-vX.Y.Z.zip`, laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.

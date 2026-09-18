@@ -1,8 +1,10 @@
 # Privacy Policy — Decky Universal Share
 
-**Last updated:** 2026-09-18
+**Last updated:** 2026-09-18 (plugin version 0.0.5a)
 
 Decky Universal Share ("the plugin") is a [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck. It runs entirely on the user's own device. This document explains what data the plugin touches, how the optional Google Drive feature works, and how to contact us.
+
+**Note:** as of version 0.0.5a, the Google Drive feature described below is implemented but temporarily disabled in the shipped plugin while its Google OAuth app goes through Google's verification process. This policy describes how it behaves once enabled.
 
 ## Summary
 
@@ -49,6 +51,6 @@ If this policy changes, the updated version will be published at this same URL i
 
 ## Contact
 
-For questions about this policy or the plugin's data handling, contact: **decky-universal-share@gmail.com**
+For questions about this policy or the plugin's data handling, contact: **decky.universal.share@gmail.com**
 
 Source code (fully open and auditable): https://github.com/Revivedx/decky-universal-share

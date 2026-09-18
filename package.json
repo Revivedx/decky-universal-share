@@ -1,6 +1,6 @@
 {
   "name": "decky-universal-share",
-  "version": "0.0.1",
+  "version": "0.0.5a",
   "description": "Browse, manage, and share your Steam Deck's native screenshots (gallery, storage limit, local QR sharing) from the Decky Quick Access Menu.",
   "type": "module",
   "scripts": {
