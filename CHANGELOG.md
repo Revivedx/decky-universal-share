@@ -2,14 +2,10 @@
 
 All notable changes to Omni-Revi-Transfer are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.0.5b] - 2026-09-18
 
 ### Changed
-- Renamed the project from "Decky Universal Share" to **Omni-Revi-Transfer — for Decky**, across the GitHub repository, `package.json`/`plugin.json` names, in-app plugin title, log messages, and the Google Drive upload folder path (now `omni-revi-transfer/screenshots/<Game Name>`). Motivated by Google's OAuth branding verification repeatedly flagging the old name as not uniquely identifying a brand (it read as a generic description of "a universal way to share on Decky" rather than a distinct product name).
-- All documentation (`README.md`, `PRIVACY.md`) and release artifact naming (`omni-revi-transfer-vX.Y.Z.zip`) updated to match.
-
-### Action required (not automated by this change)
-- Update the OAuth consent screen's app name, homepage URL, and Authorized domain in Google Cloud Console to match the renamed GitHub Pages URL (the Pages URL changes to `https://revivedx.github.io/omni-revi-transfer/` once the repo rename propagates), and re-verify domain ownership in Google Search Console under that new path.
+- Renamed the project from "Decky Universal Share" to **Omni-Revi-Transfer — for Decky** (GitHub repo, package/plugin names, in-app title, docs, and the Google Drive upload folder path).
 
 ## [0.0.5a] - 2026-09-18
 

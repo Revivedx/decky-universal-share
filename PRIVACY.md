@@ -1,10 +1,10 @@
 # Privacy Policy — Omni-Revi-Transfer
 
-**Last updated:** 2026-09-18 (plugin version 0.0.5a)
+**Last updated:** 2026-09-18 (plugin version 0.0.5b)
 
 Omni-Revi-Transfer ("the plugin") is a [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck. It runs entirely on the user's own device. This document explains what data the plugin touches, how the optional Google Drive feature works, and how to contact us.
 
-**Note:** as of version 0.0.5a, the Google Drive feature described below is implemented but temporarily disabled in the shipped plugin while its Google OAuth app goes through Google's verification process. This policy describes how it behaves once enabled.
+**Note:** as of version 0.0.5b, the Google Drive feature described below is implemented but temporarily disabled in the shipped plugin while its Google OAuth app goes through Google's verification process. This policy describes how it behaves once enabled.
 
 ## Summary
 
