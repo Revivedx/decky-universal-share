@@ -2,6 +2,14 @@
 
 All notable changes to Omni-Revi-Transfer are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Removed
+- The "iCloud (coming soon)" placeholder in the Share menu. Apple offers no public API to upload into a user's iCloud Drive/Photos from a third-party app off Apple platforms; the rationale is documented in the README's design decisions. Share via QR remains the way to send screenshots to iPhones.
+
+### Changed
+- Google Drive is enabled on the `test` branch (`GOOGLE_DRIVE_ENABLED = True` in `main.py` and `src/index.tsx`) for testing under the renamed project; `main` keeps it off until Google's verification is approved.
+
 ## [0.0.5b] - 2026-09-18
 
 ### Changed

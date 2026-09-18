@@ -90,12 +90,11 @@ const uploadScreenshotToDrive = callable<[path: string], GoogleDriveUploadResult
 
 const PAGE_SIZE = 5;
 
-// Feature flag: mirrors GOOGLE_DRIVE_ENABLED in main.py. Google's OAuth app
-// is still in "Testing" status (100 user cap, 7-day sessions) pending
-// verification (see PRIVACY.md), so the Google Drive option is hidden from
-// the UI for this release. Flip both flags back to true once approved --
-// nothing about the Drive integration itself was removed.
-const GOOGLE_DRIVE_ENABLED = false;
+// Feature flag: mirrors GOOGLE_DRIVE_ENABLED in main.py. Enabled on the
+// `test` branch; keep it false on `main` until Google's OAuth verification
+// (see PRIVACY.md) is approved, so public releases don't ship Drive linking
+// (and its "unverified app" warning) early. Both flags must match.
+const GOOGLE_DRIVE_ENABLED = true;
 
 // Generated 100% locally (no calls to any external service) so nobody's
 // share URL is exposed to a third party. `qrcode-generator` is a
@@ -168,7 +167,6 @@ const PIP_CONTENT_HEIGHT = "30vh";
 
 const SHARE_METHOD_OPTIONS = [
   { data: "qr", label: "QR Code" },
-  { data: "icloud", label: "iCloud (coming soon)" },
   ...(GOOGLE_DRIVE_ENABLED ? [{ data: "googledrive", label: "Google Drive" }] : []),
 ];
 
@@ -515,7 +513,6 @@ function PreviewModalContent({
       }
       return;
     }
-    toaster.toast({ title: "Coming soon", body: `${option.label.replace(" (coming soon)", "")} isn't wired up yet.` });
   };
 
   return (

@@ -438,13 +438,12 @@ _share_server = _ShareServer()
 
 # --- Google Drive (OAuth device flow + upload) -------------------------------
 
-# Feature flag: Google's OAuth "Testing" publishing status caps this app at
-# 100 manually-added test users and 7-day refresh tokens, which isn't viable
-# for a public release. Flip this to True once the app has passed Google's
-# OAuth verification (see PRIVACY.md) and moved to "In production". Nothing
-# below this flag is removed -- it's fully implemented and tested, just
-# gated off so a public release can ship the rest of the plugin now.
-GOOGLE_DRIVE_ENABLED = False
+# Feature flag: enabled on the `test` branch; keep it False on `main` until
+# Google's OAuth verification (see PRIVACY.md) is approved, so public
+# releases don't ship Drive linking (and its "unverified app" warning)
+# early. Nothing below this flag is removed -- it's fully implemented and
+# tested, just gated. The frontend mirrors this flag in src/index.tsx.
+GOOGLE_DRIVE_ENABLED = True
 
 # Device flow ("TVs and Limited Input devices" OAuth client) is used instead
 # of a loopback-redirect flow: it needs no local HTTP server at all (just
