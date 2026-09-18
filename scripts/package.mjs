@@ -40,7 +40,10 @@ const zipPath = path.join(releaseDir, `decky-universal-share-v${version}.zip`);
 // Files that must exist for the plugin to install and run at all.
 const requiredFiles = ["dist/index.js", "package.json", "plugin.json", "main.py"];
 // Nice-to-have files Decky's own docs recommend including alongside a submission.
-const optionalFiles = ["README.md", "LICENSE"];
+// google_credentials.json is gitignored (see .gitignore) and only present
+// locally -- included here (if present) so main.py can load it next to
+// itself once GOOGLE_DRIVE_ENABLED is flipped back on for a release.
+const optionalFiles = ["README.md", "LICENSE", "google_credentials.json"];
 
 function assertBuilt() {
   const missing = requiredFiles.filter((f) => !existsSync(path.join(rootDir, f)));

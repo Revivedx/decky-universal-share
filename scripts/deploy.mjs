@@ -41,6 +41,11 @@ const itemsToUpload = [
 if (existsSync(path.join(rootDir, "py_modules"))) {
   itemsToUpload.push({ local: "py_modules", remote: "py_modules", type: "dir" });
 }
+// Gitignored (see .gitignore) -- only present locally, uploaded so main.py
+// can load the Google OAuth client id/secret from next to itself on the Deck.
+if (existsSync(path.join(rootDir, "google_credentials.json"))) {
+  itemsToUpload.push({ local: "google_credentials.json", remote: "google_credentials.json", type: "file" });
+}
 
 async function main() {
   if (!deckIP || !deckUser || !deckPass) {
