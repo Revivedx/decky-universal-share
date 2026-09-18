@@ -1,8 +1,8 @@
 # Decky Universal Share
 
-**Version 0.0.5a** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+**What this app does:** Decky Universal Share is a plugin for the Steam Deck (installed through [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)) that lets you browse, manage, and share the screenshots your Deck already takes — right from the in-game Quick Access Menu. You can preview them, delete old ones, share one instantly to your phone with a QR code, or upload one to your own Google Drive, without ever leaving your controller.
 
-A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck that turns the screenshots Steam already takes natively (Steam button + R1/RB) into a browsable, manageable, shareable gallery — right from the Quick Access Menu.
+**Version 0.0.5a** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Installing (no build tools needed)
 
