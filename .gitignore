@@ -48,6 +48,9 @@ yalc.lock
 # Google OAuth client id/secret (see google_credentials.example.json for the shape)
 /google_credentials.json
 
+# Discord OAuth client id/secret (see discord_credentials.example.json for the shape)
+/discord_credentials.json
+
 # Ignore output folder
 
 backend/out

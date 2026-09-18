@@ -4,11 +4,17 @@ All notable changes to Omni-Revi-Transfer are documented in this file. Format lo
 
 ## [Unreleased]
 
-### Removed
-- The "iCloud (coming soon)" placeholder in the Share menu. Apple offers no public API to upload into a user's iCloud Drive/Photos from a third-party app off Apple platforms; the rationale is documented in the README's design decisions. Share via QR remains the way to send screenshots to iPhones.
+### Added
+- **Discord sharing**: link a Discord channel from Share options (OAuth `webhook.incoming`, completed in the Deck's Steam browser through a `localhost` callback) and post screenshots to it from the Share dropdown. Includes the same sudo-password confirmation as Google Drive, obfuscated storage of the webhook, single-use `state` protection, mentions disabled on posts, and webhook deletion on unlink. Posts to a channel only; Discord offers no legitimate way to DM as the user.
+- `discord_credentials.example.json`, and `DISCORD_ENABLED` flags (on for `test`, off for `main`) with the same release-zip gating as Google credentials.
+- `PRIVACY.md` and README sections for Discord.
 
 ### Changed
 - Google Drive is enabled on the `test` branch (`GOOGLE_DRIVE_ENABLED = True` in `main.py` and `src/index.tsx`) for testing under the renamed project; `main` keeps it off until Google's verification is approved.
+- Token storage helpers (`_load_obfuscated_json` / `_save_obfuscated_json`) are now shared between Google Drive and Discord.
+
+### Removed
+- The "iCloud (coming soon)" placeholder in the Share menu. Apple offers no public API to upload into a user's iCloud Drive/Photos from a third-party app off Apple platforms; the rationale is documented in the README's design decisions. Share via QR remains the way to send screenshots to iPhones.
 
 ## [0.0.5b] - 2026-09-18
 

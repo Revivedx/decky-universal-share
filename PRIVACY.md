@@ -36,6 +36,15 @@ Omni-Revi-Transfer optionally lets a user upload a screenshot to **their own** G
 - **Revoking access:** the user can unlink Google Drive at any time from the plugin's Share options panel. This deletes the locally stored session and revokes the token with Google directly, exactly like removing an app from your [Google Account's connected apps list](https://myaccount.google.com/permissions).
 - **No server-side component:** there is no backend server operated by the developer that ever sees, proxies, stores, or logs any user's screenshots, Google account information, or Drive contents. All communication is directly between the user's own Steam Deck and Google's own servers.
 
+## Discord integration (optional, off unless the user links it)
+
+Omni-Revi-Transfer optionally lets a user post a screenshot to a Discord channel of their choice:
+
+- **What we access:** the plugin requests only the `webhook.incoming` OAuth scope. It lets Discord create a webhook in the one channel the user selects; it does not let the plugin read messages, servers, or any account information.
+- **What we store:** only the resulting webhook URL, on the user's own Steam Deck, obfuscated at rest (disclosed as obfuscation, not strong encryption, before linking). Discord's access token is discarded immediately and never stored. Nothing is sent to the developer.
+- **What we upload:** only the screenshot the user explicitly chooses to send, plus its game name as the message text, directly from the Deck to Discord.
+- **Revoking access:** "Unlink Discord" deletes the webhook on Discord and the local copy. The user can also delete the webhook at any time in the channel's Integrations settings, or remove the app under Discord's Authorized Apps.
+
 ## Data retention and deletion
 
 - Screenshots are retained exactly as long as the user keeps them in Steam's own screenshots folder (or, in Google Drive, in the user's own Drive) — the plugin does not impose its own retention policy beyond the user's own configured, opt-in "auto-delete when over a storage limit" setting, which is off by default.

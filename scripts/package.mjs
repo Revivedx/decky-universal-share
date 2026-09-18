@@ -57,6 +57,14 @@ if (googleDriveEnabled) {
   console.log("  GOOGLE_DRIVE_ENABLED is False: google_credentials.json will NOT be bundled in this zip.");
 }
 
+// Same rule for discord_credentials.json (DISCORD_ENABLED in main.py).
+const discordEnabled = /DISCORD_ENABLED\s*=\s*True/.test(mainPySource);
+if (discordEnabled) {
+  optionalFiles.push("discord_credentials.json");
+} else {
+  console.log("  DISCORD_ENABLED is False: discord_credentials.json will NOT be bundled in this zip.");
+}
+
 function assertBuilt() {
   const missing = requiredFiles.filter((f) => !existsSync(path.join(rootDir, f)));
   if (missing.length) {

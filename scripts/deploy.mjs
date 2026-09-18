@@ -47,6 +47,10 @@ if (existsSync(path.join(rootDir, "google_credentials.json"))) {
   itemsToUpload.push({ local: "google_credentials.json", remote: "google_credentials.json", type: "file" });
 }
 
+if (existsSync(path.join(rootDir, "discord_credentials.json"))) {
+  itemsToUpload.push({ local: "discord_credentials.json", remote: "discord_credentials.json", type: "file" });
+}
+
 async function main() {
   if (!deckIP || !deckUser || !deckPass) {
     throw new Error(

@@ -736,9 +736,9 @@ def _xor_bytes(data: bytes, key: bytes) -> bytes:
     return bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
 
 
-def _load_google_token() -> Optional[dict]:
+def _load_obfuscated_json(path: str) -> Optional[dict]:
     try:
-        with open(GOOGLE_TOKEN_PATH, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             blob = f.read().strip()
         raw = _xor_bytes(base64.b64decode(blob.encode("ascii")), _obfuscation_key())
         return json.loads(raw.decode("utf-8"))
@@ -746,23 +746,35 @@ def _load_google_token() -> Optional[dict]:
         return None
 
 
-def _save_google_token(data: dict) -> None:
-    os.makedirs(os.path.dirname(GOOGLE_TOKEN_PATH), exist_ok=True)
+def _save_obfuscated_json(path: str, data: dict) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     raw = json.dumps(data).encode("utf-8")
     blob = base64.b64encode(_xor_bytes(raw, _obfuscation_key())).decode("ascii")
-    with open(GOOGLE_TOKEN_PATH, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(blob)
     try:
-        os.chmod(GOOGLE_TOKEN_PATH, 0o600)  # refresh_token is a long-lived secret
+        os.chmod(path, 0o600)  # these files hold long-lived secrets
     except OSError:
         pass
+
+
+def _delete_file_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _load_google_token() -> Optional[dict]:
+    return _load_obfuscated_json(GOOGLE_TOKEN_PATH)
+
+
+def _save_google_token(data: dict) -> None:
+    _save_obfuscated_json(GOOGLE_TOKEN_PATH, data)
 
 
 def _delete_google_token() -> None:
-    try:
-        os.remove(GOOGLE_TOKEN_PATH)
-    except OSError:
-        pass
+    _delete_file_quietly(GOOGLE_TOKEN_PATH)
 
 
 async def _get_google_access_token() -> Optional[str]:
@@ -787,6 +799,272 @@ async def _get_google_access_token() -> Optional[str]:
         decky.logger.warning(f"Google Drive: failed to refresh the access token: {result}")
         return None
     return result["access_token"]
+
+
+# --- Discord (OAuth webhook.incoming + upload through the webhook) ------------
+#
+# Discord has no device flow, no PKCE, and no scope that lets an app post or
+# DM *as the user* (doing that with a user token is a self-bot, against
+# Discord's terms). The one legitimate route is the `webhook.incoming` scope:
+# the user authorizes, picks a channel, and Discord creates a webhook for it
+# and returns its URL in the token response. Uploads then go through that
+# webhook, which can post to a channel but cannot send DMs (a private server
+# of your own works as a "DM to myself").
+#
+# Because there's no device flow, the link happens in the Deck's own Steam
+# browser: the authorize URL redirects to http://localhost:<port>/callback,
+# which is served by a short-lived listener bound to 127.0.0.1 only.
+
+# Feature flag, mirrored in src/index.tsx. Enabled on `test`, off on `main`.
+DISCORD_ENABLED = True
+
+DISCORD_CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "discord_credentials.json")
+
+
+def _load_discord_oauth_credentials() -> tuple:
+    try:
+        with open(DISCORD_CREDENTIALS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("client_id"), data.get("client_secret")
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None, None
+
+
+DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET = _load_discord_oauth_credentials()
+DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
+DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
+# Discord requires the redirect URI to match a registered one exactly (no
+# wildcard ports), so the listener uses one fixed port.
+DISCORD_REDIRECT_PORT = 47821
+DISCORD_REDIRECT_URI = f"http://localhost:{DISCORD_REDIRECT_PORT}/callback"
+DISCORD_LINK_TIMEOUT_SECONDS = 300
+# Discord's edge rejects urllib's default User-Agent, so a descriptive one is required.
+DISCORD_USER_AGENT = "DiscordBot (https://github.com/Revivedx/omni-revi-transfer, 0.0.5b)"
+DISCORD_WEBHOOK_URL_PREFIXES = (
+    "https://discord.com/api/webhooks/",
+    "https://discordapp.com/api/webhooks/",
+)
+
+DISCORD_TOKEN_PATH = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "discord.json")
+
+
+def _discord_request(
+    url: str,
+    method: str,
+    form: Optional[dict] = None,
+    body: Optional[bytes] = None,
+    content_type: Optional[str] = None,
+) -> tuple:
+    """Blocking request; returns (http_status, parsed_json). Status 0 = network error."""
+    headers = {"User-Agent": DISCORD_USER_AGENT}
+    data = None
+    if form is not None:
+        data = urllib.parse.urlencode(form).encode("ascii")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif body is not None:
+        data = body
+        if content_type:
+            headers["Content-Type"] = content_type
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=_SSL_CONTEXT) as resp:
+            raw, status = resp.read(), resp.status
+    except urllib.error.HTTPError as e:
+        raw, status = e.read(), e.code
+    except OSError as e:
+        return 0, {"error": str(e)}
+    try:
+        return status, (json.loads(raw.decode("utf-8")) if raw else {})
+    except ValueError:
+        return status, {"error": "non_json_response"}
+
+
+def _discord_exchange_code(code: str) -> Optional[dict]:
+    """Exchanges the authorization code for the webhook Discord created.
+
+    The response also carries an access_token; it's discarded on purpose
+    (never stored): the scope only allows creating that webhook, and
+    revoking it could make Discord delete the webhook we just got.
+    The response body is never logged since it contains the webhook token.
+    """
+    status, result = _discord_request(DISCORD_TOKEN_URL, "POST", form={
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+    })
+    webhook = result.get("webhook") if isinstance(result, dict) else None
+    url = webhook.get("url") if isinstance(webhook, dict) else None
+    if status != 200 or not url or not url.startswith(DISCORD_WEBHOOK_URL_PREFIXES):
+        decky.logger.warning(f"Discord: code exchange failed (HTTP {status}, error={result.get('error')!r}).")
+        return None
+    return {
+        "webhook_url": url,
+        "guild_id": webhook.get("guild_id"),
+        "channel_id": webhook.get("channel_id"),
+        "linked_at": time.time(),
+    }
+
+
+_DISCORD_CALLBACK_PAGE = (
+    "<!doctype html><html><head><meta charset='utf-8'><title>Omni-Revi-Transfer</title>"
+    "<style>body{{font-family:sans-serif;background:#1b2838;color:#fff;text-align:center;padding-top:20vh}}</style>"
+    "</head><body><h2>{title}</h2><p>{message}</p></body></html>"
+)
+
+
+class _DiscordLinkServer:
+    """One-shot loopback listener that receives Discord's OAuth redirect."""
+
+    def __init__(self) -> None:
+        self._server: Optional[asyncio.AbstractServer] = None
+        self._timeout_task: Optional[asyncio.Task] = None
+        self._state: Optional[str] = None
+        self.status = "idle"  # idle | pending | success | denied | expired | error
+
+    async def start(self) -> Optional[str]:
+        await self.stop()
+        self._state = secrets.token_urlsafe(24)
+        try:
+            # 127.0.0.1 only: nothing on the LAN can reach this listener.
+            self._server = await asyncio.start_server(self._handle, "127.0.0.1", DISCORD_REDIRECT_PORT)
+        except OSError as e:
+            decky.logger.warning(f"Discord: could not listen on port {DISCORD_REDIRECT_PORT}: {e}")
+            self._state = None
+            return None
+        self.status = "pending"
+        self._timeout_task = asyncio.get_event_loop().create_task(self._expire())
+        query = urllib.parse.urlencode({
+            "client_id": DISCORD_CLIENT_ID,
+            "response_type": "code",
+            "scope": "webhook.incoming",
+            "redirect_uri": DISCORD_REDIRECT_URI,
+            "state": self._state,
+        })
+        return f"{DISCORD_AUTHORIZE_URL}?{query}"
+
+    async def _expire(self) -> None:
+        await asyncio.sleep(DISCORD_LINK_TIMEOUT_SECONDS)
+        if self.status == "pending":
+            self.status = "expired"
+        await self.stop(keep_status=True)
+
+    async def stop(self, keep_status: bool = False) -> None:
+        current = asyncio.current_task()
+        if self._timeout_task is not None and self._timeout_task is not current:
+            self._timeout_task.cancel()
+        self._timeout_task = None
+        self._state = None
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
+        if not keep_status and self.status == "pending":
+            self.status = "idle"
+
+    async def _respond(self, writer: asyncio.StreamWriter, code: int, title: str, message: str) -> None:
+        page = _DISCORD_CALLBACK_PAGE.format(title=title, message=message).encode("utf-8")
+        reason = "OK" if code == 200 else "Bad Request" if code == 400 else "Not Found"
+        writer.write(
+            f"HTTP/1.1 {code} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n"
+            f"Content-Length: {len(page)}\r\nConnection: close\r\n\r\n".encode("latin-1") + page
+        )
+        await writer.drain()
+
+    async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        finished = False
+        try:
+            request_line = await reader.readline()
+            while True:
+                line = await reader.readline()
+                if line in (b"\r\n", b"\n", b""):
+                    break
+            try:
+                method, raw_path, _ = request_line.decode("latin-1").split(None, 2)
+            except ValueError:
+                return
+            parsed = urllib.parse.urlsplit(raw_path)
+            if method != "GET" or parsed.path != "/callback":
+                await self._respond(writer, 404, "Not found", "")
+                return
+
+            params = urllib.parse.parse_qs(parsed.query)
+            given_state = (params.get("state") or [""])[0]
+            if self._state is None or not secrets.compare_digest(given_state, self._state):
+                await self._respond(writer, 400, "Link failed", "This link request isn't valid. Start again from the plugin.")
+                return
+            self._state = None  # single use
+
+            if "error" in params or not params.get("code"):
+                self.status = "denied"
+                await self._respond(writer, 200, "Not linked", "Authorization was cancelled. You can return to your Deck.")
+            else:
+                linked = await _run_blocking(_discord_exchange_code, params["code"][0])
+                if linked is None:
+                    self.status = "error"
+                    await self._respond(writer, 200, "Link failed", "Discord didn't complete the link. Check the plugin log on your Deck.")
+                else:
+                    _save_obfuscated_json(DISCORD_TOKEN_PATH, linked)
+                    self.status = "success"
+                    await self._respond(writer, 200, "Discord linked", "You can close this and return to your Deck.")
+            finished = True
+        except (OSError, ConnectionError) as e:
+            decky.logger.debug(f"Discord link listener: connection interrupted: {e}")
+        finally:
+            writer.close()
+            if finished:
+                asyncio.get_event_loop().create_task(self.stop(keep_status=True))
+
+
+_discord_link_server = _DiscordLinkServer()
+
+
+def _discord_webhook_url() -> Optional[str]:
+    data = _load_obfuscated_json(DISCORD_TOKEN_PATH)
+    url = data.get("webhook_url") if data else None
+    # The file is user-writable; only ever POST to a real Discord webhook endpoint.
+    if isinstance(url, str) and url.startswith(DISCORD_WEBHOOK_URL_PREFIXES):
+        return url
+    return None
+
+
+def _upload_file_to_discord(webhook_url: str, path: str, content: str) -> dict:
+    """Blocking multipart upload through the webhook (message text + one attachment)."""
+    filename = os.path.basename(path)
+    mime = "image/png" if os.path.splitext(path)[1].lower() == ".png" else "image/jpeg"
+    with open(path, "rb") as f:
+        file_bytes = f.read()
+
+    payload = json.dumps({
+        "content": content,
+        # Game names are arbitrary text; never let one ping @everyone or a role.
+        "allowed_mentions": {"parse": []},
+        "attachments": [{"id": 0, "filename": filename}],
+    }).encode("utf-8")
+    boundary = "omni_revi_transfer_" + secrets.token_hex(8)
+    body = (
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"payload_json\"\r\n"
+        f"Content-Type: application/json\r\n\r\n".encode("utf-8")
+        + payload
+        + f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"files[0]\"; filename=\"{filename}\"\r\n"
+        f"Content-Type: {mime}\r\n\r\n".encode("utf-8")
+        + file_bytes
+        + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    )
+    status, result = _discord_request(
+        webhook_url + "?wait=true", "POST", body=body, content_type=f"multipart/form-data; boundary={boundary}"
+    )
+    if status in (200, 204):
+        return {"ok": True, "error": None}
+    decky.logger.warning(f"Discord upload failed (HTTP {status}, error={result.get('error')!r}, code={result.get('code')!r}).")
+    if status == 404:
+        return {"ok": False, "error": "not_linked"}  # the webhook was deleted on Discord's side
+    if status == 413:
+        return {"ok": False, "error": "too_large"}
+    if status == 429:
+        return {"ok": False, "error": "rate_limited"}
+    return {"ok": False, "error": "upload_failed"}
 
 
 # --- Settings -----------------------------------------------------------------
@@ -1034,12 +1312,74 @@ class Plugin:
 
         return await _run_blocking(_upload_file_to_drive, access_token, real, folder_id)
 
+    async def discord_status(self) -> dict:
+        if not DISCORD_ENABLED:
+            return {"linked": False, "enabled": False}
+        return {"linked": _discord_webhook_url() is not None, "enabled": True}
+
+    async def start_discord_link(self) -> dict:
+        """Starts the loopback listener and returns the Discord authorize URL,
+        which the frontend opens in the Deck's own Steam browser."""
+        if not DISCORD_ENABLED:
+            return {"auth_url": None, "error": "disabled"}
+        if not (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET):
+            decky.logger.warning(f"Discord: {DISCORD_CREDENTIALS_PATH} is missing or incomplete.")
+            return {"auth_url": None, "error": "not_configured"}
+        auth_url = await _discord_link_server.start()
+        if auth_url is None:
+            return {"auth_url": None, "error": "port_busy"}
+        return {"auth_url": auth_url, "error": None, "expires_in": DISCORD_LINK_TIMEOUT_SECONDS}
+
+    async def poll_discord_link(self) -> dict:
+        """pending | success | denied | expired | error | idle"""
+        if not DISCORD_ENABLED:
+            return {"status": "error"}
+        return {"status": _discord_link_server.status}
+
+    async def cancel_discord_link(self) -> None:
+        await _discord_link_server.stop()
+
+    async def unlink_discord(self) -> None:
+        if not DISCORD_ENABLED:
+            return
+        url = _discord_webhook_url()
+        if url:
+            # Deleting the webhook needs no auth beyond its own token; a
+            # failure (e.g. already deleted) is fine, the local copy goes anyway.
+            await _run_blocking(_discord_request, url, "DELETE")
+        _delete_file_quietly(DISCORD_TOKEN_PATH)
+
+    async def upload_screenshot_to_discord(self, path: str) -> dict:
+        if not DISCORD_ENABLED:
+            return {"ok": False, "error": "not_linked"}
+        real = _is_inside_steam_screenshots(path)
+        if real is None or not os.path.isfile(real):
+            decky.logger.warning(f"Invalid path when uploading to Discord: {path}")
+            return {"ok": False, "error": "invalid_path"}
+
+        webhook_url = _discord_webhook_url()
+        if webhook_url is None:
+            return {"ok": False, "error": "not_linked"}
+
+        appid = _extract_appid_from_screenshot_path(real) or "7"
+        result = await _run_blocking(
+            _upload_file_to_discord, webhook_url, real, f"**{_resolve_drive_folder_name(appid)}**"
+        )
+        if result.get("error") == "not_linked":
+            _delete_file_quietly(DISCORD_TOKEN_PATH)  # webhook no longer exists; drop the stale link
+        return result
+
     async def _main(self) -> None:
         decky.logger.info("Omni-Revi-Transfer started (indexing Steam's native screenshots).")
         if GOOGLE_DRIVE_ENABLED and not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
             decky.logger.warning(
                 f"Google Drive is enabled but {GOOGLE_CREDENTIALS_PATH} is missing or incomplete; "
                 "the Drive link flow will fail until it's restored."
+            )
+        if DISCORD_ENABLED and not (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET):
+            decky.logger.warning(
+                f"Discord is enabled but {DISCORD_CREDENTIALS_PATH} is missing or incomplete; "
+                "the Discord link flow will fail until it's restored."
             )
         account_id = _detect_steam_account_id()
         if account_id is None:
@@ -1049,6 +1389,7 @@ class Plugin:
 
     async def _unload(self) -> None:
         await _share_server.stop()
+        await _discord_link_server.stop()
         decky.logger.info("Omni-Revi-Transfer stopped.")
 
     async def _uninstall(self) -> None:

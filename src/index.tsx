@@ -4,6 +4,7 @@ import {
   DropdownItem,
   Focusable,
   ModalRoot,
+  Navigation,
   PanelSection,
   PanelSectionRow,
   showModal,
@@ -19,7 +20,7 @@ import {
   definePlugin,
   toaster,
 } from "@decky/api"
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaArrowDown, FaArrowUp, FaCamera, FaSyncAlt } from "react-icons/fa";
 import qrcode from "qrcode-generator";
 
@@ -74,6 +75,25 @@ interface GoogleDriveUploadResult {
   error: "invalid_path" | "not_linked" | "upload_failed" | "duplicate" | null;
 }
 
+interface DiscordStatus {
+  linked: boolean;
+}
+
+interface DiscordLinkStart {
+  auth_url: string | null;
+  error: "disabled" | "not_configured" | "port_busy" | null;
+  expires_in?: number;
+}
+
+interface DiscordLinkPoll {
+  status: "idle" | "pending" | "success" | "denied" | "expired" | "error";
+}
+
+interface DiscordUploadResult {
+  ok: boolean;
+  error: "invalid_path" | "not_linked" | "upload_failed" | "too_large" | "rate_limited" | null;
+}
+
 const getScreenshots = callable<[offset: number, limit: number], ScreenshotPage>("get_screenshots");
 const getScreenshotImage = callable<[path: string], string | null>("get_screenshot_image");
 const deleteScreenshot = callable<[path: string], boolean>("delete_screenshot");
@@ -87,6 +107,12 @@ const startGoogleDriveLink = callable<[], GoogleDriveLinkStart>("start_google_dr
 const pollGoogleDriveLink = callable<[], GoogleDriveLinkPoll>("poll_google_drive_link");
 const unlinkGoogleDrive = callable<[], void>("unlink_google_drive");
 const uploadScreenshotToDrive = callable<[path: string], GoogleDriveUploadResult>("upload_screenshot_to_drive");
+const getDiscordStatus = callable<[], DiscordStatus>("discord_status");
+const startDiscordLink = callable<[], DiscordLinkStart>("start_discord_link");
+const pollDiscordLink = callable<[], DiscordLinkPoll>("poll_discord_link");
+const cancelDiscordLink = callable<[], void>("cancel_discord_link");
+const unlinkDiscord = callable<[], void>("unlink_discord");
+const uploadScreenshotToDiscord = callable<[path: string], DiscordUploadResult>("upload_screenshot_to_discord");
 
 const PAGE_SIZE = 5;
 
@@ -95,6 +121,10 @@ const PAGE_SIZE = 5;
 // (see PRIVACY.md) is approved, so public releases don't ship Drive linking
 // (and its "unverified app" warning) early. Both flags must match.
 const GOOGLE_DRIVE_ENABLED = true;
+
+// Same idea for Discord (mirrors DISCORD_ENABLED in main.py): on for `test`,
+// off for `main` until the feature ships in a release.
+const DISCORD_ENABLED = true;
 
 // Generated 100% locally (no calls to any external service) so nobody's
 // share URL is exposed to a third party. `qrcode-generator` is a
@@ -168,6 +198,7 @@ const PIP_CONTENT_HEIGHT = "30vh";
 const SHARE_METHOD_OPTIONS = [
   { data: "qr", label: "QR Code" },
   ...(GOOGLE_DRIVE_ENABLED ? [{ data: "googledrive", label: "Google Drive" }] : []),
+  ...(DISCORD_ENABLED ? [{ data: "discord", label: "Discord" }] : []),
 ];
 
 // ModalRoot is used instead of ConfirmModal: the latter always forces its
@@ -375,7 +406,17 @@ function openGoogleDriveLinkModal(onLinked: () => void) {
 // password here means someone who picks up an already-unlocked Deck can't
 // silently link their own Google account on it. The password is sent once,
 // straight to sudo's stdin on the backend, and is never logged or stored.
-function GoogleDriveConfirmModal({ onConfirmed, onClose }: { onConfirmed: () => void; onClose: () => void }) {
+function LinkConfirmModal({
+  service,
+  detail,
+  onConfirmed,
+  onClose,
+}: {
+  service: string;
+  detail: string;
+  onConfirmed: () => void;
+  onClose: () => void;
+}) {
   const [password, setPassword] = useState("");
   const [checking, setChecking] = useState(false);
   const [errorShown, setErrorShown] = useState(false);
@@ -400,12 +441,11 @@ function GoogleDriveConfirmModal({ onConfirmed, onClose }: { onConfirmed: () => 
   return (
     <ModalRoot onCancel={onClose} closeModal={onClose} bHideCloseIcon={false}>
       <div style={{ minHeight: PIP_CONTENT_HEIGHT, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        <div style={{ fontWeight: 600, marginBottom: "8px" }}>Link Google Drive</div>
+        <div style={{ fontWeight: 600, marginBottom: "8px" }}>Link {service}</div>
         <div style={{ fontSize: "0.75em", opacity: 0.8, marginBottom: "10px" }}>
-          Linking saves a session on this Deck so you won't have to re-approve every time. It's
-          obfuscated on disk, not left as plain text, but it isn't full encryption — if this Deck
-          were ever compromised, that saved session could be at risk. Enter this Deck's password
-          to confirm it's really you before continuing.
+          {detail} It's obfuscated on disk, not left as plain text, but it isn't full encryption — if
+          this Deck were ever compromised, it could be at risk. Enter this Deck's password to
+          confirm it's really you before continuing.
         </div>
         {/* `bIsPassword` alone didn't mask the input in practice, so the native
             HTML `type="password"` is forced through too -- TextFieldProps'
@@ -441,10 +481,131 @@ function GoogleDriveConfirmModal({ onConfirmed, onClose }: { onConfirmed: () => 
 
 function openGoogleDriveConfirmModal(onLinked: () => void) {
   const modal = showModal(
-    <GoogleDriveConfirmModal
+    <LinkConfirmModal
+      service="Google Drive"
+      detail="Linking saves a session on this Deck so you won't have to re-approve every time."
       onConfirmed={() => {
         modal.Close();
         openGoogleDriveLinkModal(onLinked);
+      }}
+      onClose={() => modal.Close()}
+    />
+  );
+}
+
+// Discord has no device flow, so there's no phone QR here: the authorize
+// page opens in the Deck's own Steam browser, and Discord redirects back to
+// a listener the plugin backend runs on this same Deck (localhost). The
+// backend finishes the link by itself; this modal just opens the page and
+// watches for the result. (Discord's own login page offers "log in with QR
+// code" from your phone if typing a password on the Deck is a hassle.)
+function DiscordLinkModal({ onLinked, onClose }: { onLinked: () => void; onClose: () => void }) {
+  const [state, setState] = useState<"starting" | "ready" | "success" | "denied" | "expired" | "error">("starting");
+  const [authUrl, setAuthUrl] = useState<string | undefined>();
+  const [errorText, setErrorText] = useState<string | undefined>();
+  // Set once the browser has been opened: from then on the backend listener
+  // must survive this modal closing, or Discord's redirect would hit nothing.
+  const handedOffToBrowser = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      const result = await pollDiscordLink();
+      if (cancelled) return;
+      if (result.status === "pending" || result.status === "idle") {
+        pollTimer = setTimeout(poll, 2000);
+      } else if (result.status === "success") {
+        setState("success");
+        onLinked();
+      } else {
+        setState(result.status);
+      }
+    };
+
+    startDiscordLink().then((result) => {
+      if (cancelled) return;
+      if (result.error || !result.auth_url) {
+        setErrorText(
+          result.error === "not_configured"
+            ? "Discord isn't set up in this build (missing discord_credentials.json)."
+            : result.error === "port_busy"
+              ? "Port 47821 is busy. Close whatever is using it and try again."
+              : "Couldn't start the Discord link. Check the plugin log."
+        );
+        setState("error");
+        return;
+      }
+      setAuthUrl(result.auth_url);
+      setState("ready");
+      pollTimer = setTimeout(poll, 2000);
+    });
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      if (!handedOffToBrowser.current) cancelDiscordLink();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <ModalRoot onCancel={onClose} closeModal={onClose} bHideCloseIcon={false}>
+      <div
+        style={{
+          minHeight: PIP_CONTENT_HEIGHT,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: "8px" }}>Link Discord</div>
+
+        {state === "starting" && <div>Starting...</div>}
+
+        {state === "ready" && authUrl && (
+          <>
+            <div style={{ fontSize: "0.75em", opacity: 0.8, marginBottom: "8px" }}>
+              Log in to Discord and pick the channel screenshots should be posted to. Uploads go
+              to that channel only, and Discord can't be used to send private messages this way
+              (a private server of your own works as a "DM to myself").
+            </div>
+            <ButtonItem
+              layout="below"
+              onClick={() => {
+                handedOffToBrowser.current = true;
+                Navigation.NavigateToExternalWeb(authUrl);
+                onClose();
+              }}
+            >
+              Open Discord login
+            </ButtonItem>
+            <div style={{ fontSize: "0.7em", opacity: 0.6 }}>
+              Opens in the Steam browser. When it says "Discord linked", come back here.
+            </div>
+          </>
+        )}
+
+        {state === "success" && <div style={{ color: "#4caf50" }}>✓ Linked! You can close this window.</div>}
+        {state === "denied" && <div>Authorization was cancelled. Try again from Share options.</div>}
+        {state === "expired" && <div>The link request timed out. Try again from Share options.</div>}
+        {state === "error" && <div>{errorText ?? "Couldn't link Discord. Check the plugin log."}</div>}
+      </div>
+    </ModalRoot>
+  );
+}
+
+function openDiscordConfirmModal(onLinked: () => void) {
+  const modal = showModal(
+    <LinkConfirmModal
+      service="Discord"
+      detail="Linking saves a webhook address on this Deck; anyone who has it can post to that Discord channel."
+      onConfirmed={() => {
+        modal.Close();
+        const linkModal = showModal(<DiscordLinkModal onLinked={onLinked} onClose={() => linkModal.Close()} />);
       }}
       onClose={() => modal.Close()}
     />
@@ -508,6 +669,27 @@ function PreviewModalContent({
         toaster.toast({ title: "Uploaded to Google Drive", body: item.filename });
       } else if (result.error === "duplicate") {
         toaster.toast({ title: "Already on Google Drive", body: `${item.filename} was uploaded before.` });
+      } else {
+        toaster.toast({ title: "Upload failed", body: "Check the plugin log for details." });
+      }
+      return;
+    }
+    if (option.data === "discord") {
+      const status = await getDiscordStatus();
+      if (!status.linked) {
+        toaster.toast({ title: "Discord isn't linked", body: "Link it from Share options first." });
+        return;
+      }
+      toaster.toast({ title: "Sending to Discord...", body: item.filename });
+      const result = await uploadScreenshotToDiscord(item.path);
+      if (result.ok) {
+        toaster.toast({ title: "Sent to Discord", body: item.filename });
+      } else if (result.error === "not_linked") {
+        toaster.toast({ title: "Discord link is gone", body: "The webhook was removed on Discord. Link it again." });
+      } else if (result.error === "too_large") {
+        toaster.toast({ title: "Too large for Discord", body: "That server's upload limit was exceeded." });
+      } else if (result.error === "rate_limited") {
+        toaster.toast({ title: "Discord is rate limiting", body: "Wait a few seconds and try again." });
       } else {
         toaster.toast({ title: "Upload failed", body: "Check the plugin log for details." });
       }
@@ -832,16 +1014,24 @@ function ShareOptionsPanel() {
   const [settings, setLocalSettings] = useState<Settings | undefined>();
   const [driveLinked, setDriveLinked] = useState<boolean | undefined>();
   const [unlinking, setUnlinking] = useState(false);
+  const [discordLinked, setDiscordLinked] = useState<boolean | undefined>();
+  const [unlinkingDiscord, setUnlinkingDiscord] = useState(false);
 
   const refreshDriveStatus = useCallback(() => {
     if (!GOOGLE_DRIVE_ENABLED) return;
     getGoogleDriveStatus().then((s) => setDriveLinked(s.linked));
   }, []);
 
+  const refreshDiscordStatus = useCallback(() => {
+    if (!DISCORD_ENABLED) return;
+    getDiscordStatus().then((s) => setDiscordLinked(s.linked));
+  }, []);
+
   useEffect(() => {
     getSettings().then(setLocalSettings);
     refreshDriveStatus();
-  }, [refreshDriveStatus]);
+    refreshDiscordStatus();
+  }, [refreshDriveStatus, refreshDiscordStatus]);
 
   const update = async (patch: Partial<Settings>) => {
     if (!settings) return;
@@ -859,6 +1049,17 @@ function ShareOptionsPanel() {
       refreshDriveStatus();
     } finally {
       setUnlinking(false);
+    }
+  };
+
+  const onUnlinkDiscord = async () => {
+    setUnlinkingDiscord(true);
+    try {
+      await unlinkDiscord();
+      toaster.toast({ title: "Discord unlinked", body: "The webhook was deleted." });
+      refreshDiscordStatus();
+    } finally {
+      setUnlinkingDiscord(false);
     }
   };
 
@@ -895,6 +1096,24 @@ function ShareOptionsPanel() {
               onClick={() => openGoogleDriveConfirmModal(refreshDriveStatus)}
             >
               Link Google Drive
+            </ButtonItem>
+          )}
+        </PanelSectionRow>
+      )}
+
+      {expanded && DISCORD_ENABLED && (
+        <PanelSectionRow>
+          {discordLinked ? (
+            <ButtonItem layout="below" disabled={unlinkingDiscord} onClick={onUnlinkDiscord}>
+              {unlinkingDiscord ? "Unlinking..." : "Unlink Discord"}
+            </ButtonItem>
+          ) : (
+            <ButtonItem
+              layout="below"
+              disabled={discordLinked === undefined}
+              onClick={() => openDiscordConfirmModal(refreshDiscordStatus)}
+            >
+              Link Discord
             </ButtonItem>
           )}
         </PanelSectionRow>
