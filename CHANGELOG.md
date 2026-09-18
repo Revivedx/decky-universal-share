@@ -15,6 +15,9 @@ All notable changes to Omni-Revi-Transfer are documented in this file. Format lo
 - Manual upload logic for Drive and Discord moved into shared functions used by both the Share menu and auto-upload.
 - Token storage helpers (`_load_obfuscated_json` / `_save_obfuscated_json`) are now shared between Google Drive and Discord.
 
+### Fixed
+- Games installed on a microSD card (or any other Steam library folder) showed up as "Game (<appid>)" instead of their name, because only the internal library's `steamapps` was searched. Every library listed in `libraryfolders.vdf` is now checked, which also fixes the game-name folder used for Google Drive uploads and the Discord message text.
+
 ### Removed
 - The "iCloud (coming soon)" placeholder in the Share menu. Apple offers no public API to upload into a user's iCloud Drive/Photos from a third-party app off Apple platforms; the rationale is documented in the README's design decisions. Share via QR remains the way to send screenshots to iPhones.
 

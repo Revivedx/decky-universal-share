@@ -100,18 +100,37 @@ def _steam_remote_root() -> Optional[str]:
     return remote if os.path.isdir(remote) else None
 
 
+def _steamapps_dirs() -> list[str]:
+    """Every Steam library's steamapps/ folder: the internal one plus any
+    others (e.g. a microSD card) listed in libraryfolders.vdf. A game
+    installed on the card has its appmanifest there, not in the internal
+    library."""
+    dirs = [STEAM_APPMANIFEST_DIR]
+    try:
+        with open(os.path.join(STEAM_APPMANIFEST_DIR, "libraryfolders.vdf"), "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+    except OSError:
+        return dirs
+    for library_path in re.findall(r'"path"\s*"([^"]+)"', content):
+        candidate = os.path.join(library_path, "steamapps")
+        if candidate not in dirs:
+            dirs.append(candidate)
+    return dirs
+
+
 def _resolve_app_name(appid: str) -> str:
     if appid == "7":
         return "SteamOS / Desktop"
-    manifest = os.path.join(STEAM_APPMANIFEST_DIR, f"appmanifest_{appid}.acf")
-    try:
-        with open(manifest, "r", encoding="utf-8", errors="ignore") as f:
-            content = f.read()
+    for steamapps_dir in _steamapps_dirs():
+        manifest = os.path.join(steamapps_dir, f"appmanifest_{appid}.acf")
+        try:
+            with open(manifest, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        except OSError:
+            continue
         match = re.search(r'"name"\s*"([^"]+)"', content)
         if match:
             return match.group(1)
-    except OSError:
-        pass
     return f"Game ({appid})"
 
 
