@@ -7,6 +7,7 @@ import {
   Navigation,
   PanelSection,
   PanelSectionRow,
+  Router,
   showModal,
   SliderField,
   staticClasses,
@@ -130,16 +131,15 @@ const uploadScreenshotToDiscord = callable<[path: string], DiscordUploadResult>(
 //
 // - Account upload: SteamClient.Screenshots.UploadLocalScreenshot (typed and
 //   part of the client API decky plugins commonly use).
-// - Friend message: the screenshot is uploaded, then its community link is
-//   sent through Steam's internal chat store (window.g_FriendsUIApp). That
-//   store is NOT a documented API, so it can change with any Steam update;
-//   every use is feature-checked and wrapped so a change degrades to an
-//   error toast instead of breaking the plugin.
+// - Friend message: repeats what Steam's own Media > Share > friend does.
+//   It opens that friend's chat window and stages the image in it
+//   (ChatView.SetFileToUpload), where the user confirms, and can tag it as a
+//   spoiler, before sending. Nothing is uploaded to the user's account. This
+//   goes through Steam's internal chat store (window.g_FriendsUIApp), which is
+//   NOT a documented API and can change with any Steam update, so every use
+//   is feature-checked and a change degrades to opening the plain chat.
 
-// Steam's EUCMFilePrivacyState values.
-const STEAM_PRIVACY_PRIVATE = 2;
-const STEAM_PRIVACY_FRIENDS_ONLY = 4;
-
+// Steam's EUCMFilePrivacyState values: 2 private, 4 friends only, 16 unlisted, 8 public.
 const STEAM_PRIVACY_OPTIONS = [
   { data: 2, label: "Private (only you)" },
   { data: 4, label: "Friends only" },
@@ -162,7 +162,9 @@ interface SteamScreenshotInfo {
 
 interface SteamFriend {
   accountid: number;
+  steamid64: string;
   name: string;
+  avatarUrl?: string;
 }
 
 interface SteamUploadOutcome {
@@ -174,7 +176,6 @@ interface SteamUploadOutcome {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const isRealFileId = (id?: string): id is string => !!id && id !== "0";
-const steamFileUrl = (fileId: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${fileId}`;
 
 async function listSteamScreenshots(): Promise<SteamScreenshotInfo[]> {
   return (await SteamClient.Screenshots.GetAllAppsLocalScreenshots()) as unknown as SteamScreenshotInfo[];
@@ -203,31 +204,33 @@ async function uploadSteamScreenshot(shot: SteamScreenshotInfo, privacy: number)
   return { ok: true };
 }
 
+// Friends you chatted with recently come first (like Steam's own picker),
+// then everyone else alphabetically.
 function listSteamFriends(): SteamFriend[] {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  /* eslint-disable @typescript-eslint/no-explicit-any */
   const all: any[] = (window as any).friendStore?.allFriends ?? [];
+  const recentChats: any[] = (window as any).g_FriendsUIApp?.ChatStore?.GetRecentChats?.() ?? [];
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  const recentRank = new Map<number, number>();
+  recentChats.forEach((chat, index) => {
+    if (typeof chat.accountid_partner === "number" && !recentRank.has(chat.accountid_partner)) {
+      recentRank.set(chat.accountid_partner, index);
+    }
+  });
   return all
     .filter((f) => f.is_friend)
-    .map((f) => ({ accountid: f.accountid as number, name: String(f.display_name ?? f.accountid) }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((f) => ({
+      accountid: f.accountid as number,
+      steamid64: String(f.steamid64),
+      name: String(f.display_name ?? f.accountid),
+      avatarUrl: (f.persona?.avatar_url_medium ?? f.persona?.avatar_url) as string | undefined,
+    }))
+    .sort((a, b) => {
+      const ra = recentRank.get(a.accountid) ?? Infinity;
+      const rb = recentRank.get(b.accountid) ?? Infinity;
+      return ra !== rb ? ra - rb : a.name.localeCompare(b.name);
+    });
 }
-
-async function sendSteamChatMessage(accountid: number, text: string): Promise<boolean> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const chat = (window as any).g_FriendsUIApp?.ChatStore?.GetFriendChat(accountid);
-    if (!chat || typeof chat.SendChatMessage !== "function") return false;
-    await chat.SendChatMessage(text);
-    return true;
-  } catch (e) {
-    console.error("Omni-Revi-Transfer: sending the Steam chat message failed", e);
-    return false;
-  }
-}
-
-// Chat messages are parsed as BBCode, so brackets in a game name would be
-// read as tags.
-const chatSafe = (text: string) => text.replace(/[[\]]/g, "");
 
 // Uploads to the user's account, then reports the outcome with a toast.
 // Returns the outcome so callers (the friend flow) can reuse the file id.
@@ -256,28 +259,43 @@ async function shareToSteamAccount(item: ScreenshotItem, privacy: number): Promi
 }
 
 async function shareToSteamFriend(item: ScreenshotItem, friend: SteamFriend): Promise<void> {
-  const outcome = await shareToSteamAccount(item, STEAM_PRIVACY_FRIENDS_ONLY);
-  if (!outcome.ok) return;
-  if (!isRealFileId(outcome.fileId)) {
-    toaster.toast({ title: "Couldn't get the Steam link", body: "The upload went through but Steam gave no link to send." });
-    return;
-  }
-  if (outcome.privacy === STEAM_PRIVACY_PRIVATE) {
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const app = (window as any).g_FriendsUIApp;
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+    const chat = app?.ChatStore?.GetFriendChat(friend.accountid);
+    if (!chat || typeof app?.UIStore?.ShowAndOrActivateChat !== "function") {
+      throw new Error("Steam's chat isn't reachable");
+    }
+
+    const dataUri = await getScreenshotImage(item.path);
+    if (!dataUri) throw new Error("couldn't read the screenshot");
+    const blob = await (await fetch(dataUri)).blob();
+    const file = new File([blob], item.filename, { type: blob.type || "image/jpeg" });
+
+    // The app id Steam files the image under; it's the folder name in .../remote/<appid>/screenshots/.
+    const appId = Number(/remote[\\/](\d+)[\\/]screenshots/.exec(item.path)?.[1] ?? 0);
+
+    const ownerWindow = Router.WindowStore?.GamepadUIMainWindowInstance?.BrowserWindow ?? window;
+    let view = app.UIStore.ShowAndOrActivateChat(ownerWindow, chat, true);
+    if (typeof view?.GetChatView === "function") view = view.GetChatView();
+    if (typeof view?.SetFileToUpload !== "function") throw new Error("the chat can't take a file");
+    view.SetFileToUpload(file, { unAssociatedAppID: appId });
+
+    toaster.toast({ title: `Chat with ${friend.name} is open`, body: "Confirm the screenshot there to send it." });
+  } catch (e) {
+    console.error("Omni-Revi-Transfer: staging the screenshot in Steam chat failed", e);
+    // Fall back to just opening the chat, so the user can attach it by hand.
+    try {
+      SteamClient.WebChat.ShowFriendChatDialog(friend.steamid64);
+    } catch (openError) {
+      console.error("Omni-Revi-Transfer: opening the Steam chat failed too", openError);
+    }
     toaster.toast({
-      title: "That screenshot is Private on Steam",
-      body: "Your friend couldn't open it. Change its privacy in Steam first.",
+      title: "Couldn't attach the screenshot",
+      body: "Steam's chat changed or isn't reachable; the chat was opened instead.",
     });
-    return;
   }
-  const sent = await sendSteamChatMessage(
-    friend.accountid,
-    `${chatSafe(item.appName)} screenshot: ${steamFileUrl(outcome.fileId)}`
-  );
-  toaster.toast(
-    sent
-      ? { title: `Sent to ${friend.name}`, body: "The screenshot link is in your Steam chat." }
-      : { title: "Couldn't message your friend", body: "Steam's chat isn't reachable from the plugin." }
-  );
 }
 
 const PAGE_SIZE = 5;
@@ -804,8 +822,8 @@ function FriendPickerModal({ onPick, onClose }: { onPick: (friend: SteamFriend) 
       <div style={{ minHeight: PIP_CONTENT_HEIGHT, display: "flex", flexDirection: "column" }}>
         <div style={{ fontWeight: 600, marginBottom: "4px" }}>Send to a Steam friend</div>
         <div style={{ fontSize: "0.75em", opacity: 0.8, marginBottom: "8px" }}>
-          The screenshot is uploaded to your Steam account as Friends only, and its link is sent to
-          them in Steam chat.
+          Opens the chat with this screenshot ready to send. You can tag it as a spoiler there
+          before sending.
         </div>
         <TextField value={query} onChange={(e) => setQuery(e.target.value)} />
         {friends.length === 0 && (
@@ -813,7 +831,12 @@ function FriendPickerModal({ onPick, onClose }: { onPick: (friend: SteamFriend) 
         )}
         {matches.slice(0, FRIEND_PICKER_MAX_SHOWN).map((friend) => (
           <ButtonItem key={friend.accountid} layout="below" onClick={() => onPick(friend)}>
-            {friend.name}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              {friend.avatarUrl && (
+                <img src={friend.avatarUrl} alt="" style={{ width: 28, height: 28, borderRadius: 4 }} />
+              )}
+              <span>{friend.name}</span>
+            </div>
           </ButtonItem>
         ))}
         {matches.length > FRIEND_PICKER_MAX_SHOWN && (

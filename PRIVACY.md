@@ -47,7 +47,7 @@ Omni-Revi-Transfer optionally lets a user post a screenshot to a Discord channel
 
 ## Steam sharing (optional)
 
-The plugin can upload a screenshot the user chooses to **their own Steam account** and send its link to a friend in Steam chat. Both are performed by the user's own Steam client on their Deck, directly with Valve's services under the user's own Steam login; the plugin developer never receives the screenshots, the links, the friends list, or any message. The plugin reads the user's Steam friends list locally on the Deck only to let them pick a recipient. Uploads use the privacy level the user selects (Private by default; sending to a friend always uses Friends only), and the plugin cannot delete screenshots once they are uploaded to Steam.
+The plugin can upload a screenshot the user chooses to **their own Steam account**, and can open a friend's Steam chat with a screenshot staged in it for the user to confirm. Both are performed by the user's own Steam client on their Deck, directly with Valve's services under the user's own Steam login; the plugin developer never receives the screenshots, the friends list, or any message. The plugin reads the user's Steam friends list and recent chats locally on the Deck only, to let them pick a recipient. Account uploads use the privacy level the user selects (Private by default), and the plugin cannot delete screenshots once they are uploaded to Steam. Staging a screenshot in a chat sends nothing until the user confirms it in Steam's own chat window.
 
 ## Optional automatic upload
 
