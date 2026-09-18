@@ -58,3 +58,6 @@ out/*
 cli/
 cli/*
 cli/decky
+
+# Distributable zip built by `npm run package`
+/release/

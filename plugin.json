@@ -1,11 +1,10 @@
 {
   "name": "Decky Universal Share",
-  "author": "John Doe",
+  "author": "Revivedx",
   "flags": ["debug"],
   "api_version": 1,
   "publish": {
-    "tags": ["template", "root"],
-    "description": "Decky example plugin.",
-    "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
+    "tags": ["screenshots", "utility", "sharing"],
+    "description": "Browse, manage, and share your Steam Deck's native screenshots (gallery, storage limit, local QR sharing) from the Quick Access Menu."
   }
 }

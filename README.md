@@ -2,6 +2,13 @@
 
 A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck that turns the screenshots Steam already takes natively (Steam button + R1/RB) into a browsable, manageable, shareable gallery — right from the Quick Access Menu.
 
+## Installing (no build tools needed)
+
+1. Grab the latest `decky-universal-share-vX.Y.Z.zip` from this repo's [Releases](https://github.com/Revivedx/decky-universal-share/releases) page (or build one yourself, see below).
+2. On the Deck (or any Linux machine running Decky Loader), open Decky's Quick Access Menu → **Settings** → enable **Developer Mode** if it isn't already.
+3. In the Decky Settings' **Developer** tab, use **Install Plugin from ZIP** and pick the file.
+4. Decky Universal Share should now show up in the plugin list — no compiling, no SSH, no Node/Python toolchain required on your end.
+
 ## What it does (current scope)
 
 - **Gallery**: lists Steam's native screenshots across *every* game (plus the special "SteamOS / Desktop" bucket Steam uses for shots taken outside a game), newest first, 5 per page, with Previous/Next navigation and a manual Refresh button.
@@ -52,6 +59,7 @@ This does mean: while a share is active, anyone else on the same network who som
 | `rollup` + `@decky/rollup` | Bundles `src/index.tsx` into `dist/index.js` |
 | `typescript` | Type checking |
 | `node-ssh` | Powers `scripts/deploy.mjs`, our own SSH/SFTP deploy script (see below) |
+| `archiver` | Powers `scripts/package.mjs`, builds the distributable install zip |
 
 ## Development workflow
 
@@ -63,6 +71,7 @@ This repo's deploy path is custom (built while developing on Windows against a p
    ```
 2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
 3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
+4. `npm run package` — builds the frontend and produces `release/decky-universal-share-vX.Y.Z.zip`, laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
 
 ## Not currently used
 
