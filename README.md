@@ -1,6 +1,6 @@
 # Decky Universal Share
 
-**Version 0.0.5a**
+**Version 0.0.5a** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 A [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck that turns the screenshots Steam already takes natively (Steam button + R1/RB) into a browsable, manageable, shareable gallery — right from the Quick Access Menu.
 
