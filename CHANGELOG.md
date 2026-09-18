@@ -2,7 +2,7 @@
 
 All notable changes to Omni-Revi-Transfer are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.0.8] - 2026-09-18
 
 ### Added
 - **Discord sharing**: link a Discord channel from Share options (OAuth `webhook.incoming`, completed in the Deck's Steam browser through a `localhost` callback) and post screenshots to it from the Share dropdown. Includes the same sudo-password confirmation as Google Drive, obfuscated storage of the webhook, single-use `state` protection, mentions disabled on posts, and webhook deletion on unlink. Posts to a channel only; Discord offers no legitimate way to DM as the user.
@@ -31,7 +31,7 @@ All notable changes to Omni-Revi-Transfer are documented in this file. Format lo
 ## [0.0.5a] - 2026-09-18
 
 ### Added
-- Google Drive upload from the screenshot preview's Share menu, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game) at the time of this release — see [Unreleased](#unreleased) above for the later folder-path rename, with duplicate-upload detection.
+- Google Drive upload from the screenshot preview's Share menu, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game) at the time of this release — see [0.0.8](#008---2026-09-18) above for the later folder-path rename, with duplicate-upload detection.
 - Google OAuth device-flow linking (scan a QR, approve on your phone) with a step-up sudo-password confirmation gate before a link can start, and an explicit on-screen disclosure of what a compromised Deck could mean for the saved session.
 - At-rest obfuscation (not full encryption, disclosed as such) for the locally stored Google session token.
 - "Unlimited" option for the storage warning limit, alongside the existing 0.5–50 GB range.
