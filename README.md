@@ -88,13 +88,6 @@ One time:
 
 No Discord review is needed for the `webhook.incoming` scope.
 
-## Personal build
-
-For developers who want the plugin on their own devices (another Deck, or another Linux PC running Decky Loader) with their credentials already inside:
-
-- `npm run package` builds the **public** zip: `omni-revi-transfer-vX.Y.Z.zip`, which never contains credentials.
-- `npm run package:personal` builds `omni-revi-transfer-vX.Y.Z-personal.zip`, which bundles your gitignored `google_credentials.json` and `discord_credentials.json` so nothing needs to be set up on the target device. **Never publish this one**: it contains your secrets. It refuses to build if a credentials file is missing.
-
 ## Security
 
 The short version, since the usual worry is someone getting hold of your keys. More detail in [PRIVACY.md](PRIVACY.md).
@@ -107,27 +100,6 @@ The short version, since the usual worry is someone getting hold of your keys. M
 - **Sharing safeguards.** A QR link is a random one-time address, only on your local network, serving only that file, and it closes after the download or the timeout (anyone on your Wi-Fi with that exact address could fetch it meanwhile). Auto-upload is off by default and has no filter: it uploads whatever you screenshot, and the delay is your window to delete it first. Steam uploads count against your Cloud space and the plugin can't delete them; the **Public** privacy makes them visible on your profile.
 - **The installer** is a readable shell script, asks for your password once, and only touches the plugin's folders.
 
-## Dependencies
-
-**Runtime (bundled into `dist/index.js`):**
-| Package | Why |
-|---|---|
-| [`@decky/api`](https://www.npmjs.com/package/@decky/api) | Frontend↔backend RPC (`callable`, events), plugin registration |
-| [`@decky/ui`](https://www.npmjs.com/package/@decky/ui) | Steam-styled UI components (panels, buttons, sliders, modals) |
-| [`react-icons`](https://www.npmjs.com/package/react-icons) | Icons (camera, arrows, refresh) |
-| [`qrcode-generator`](https://www.npmjs.com/package/qrcode-generator) | Fully local, dependency-free QR code rendering |
-| `tslib` | TypeScript helper runtime |
-
-**Backend:** Python standard library only (`asyncio`, `socket`, `secrets`, `shutil`, `json`, `re`, `base64`, `hashlib`, `ssl`, `urllib.request`/`urllib.parse`) plus the `decky` module Decky Loader itself provides. No pip packages are vendored.
-
-**Dev tooling:**
-| Package | Why |
-|---|---|
-| `rollup` + `@decky/rollup` | Bundles `src/index.tsx` into `dist/index.js` |
-| `typescript` | Type checking |
-| `node-ssh` | Powers `scripts/deploy.mjs`, our own SSH/SFTP deploy script (see [DEVELOPMENT.md](DEVELOPMENT.md)) |
-| `archiver` | Powers `scripts/package.mjs`, builds the distributable install zip |
-
 ## Development
 
-Building from source, deploying to a Deck and publishing a release are covered in [DEVELOPMENT.md](DEVELOPMENT.md).
+Building from source, deploying to a Deck, personal builds, the dependency list and publishing a release are covered in [DEVELOPMENT.md](DEVELOPMENT.md).

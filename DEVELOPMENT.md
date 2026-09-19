@@ -24,6 +24,31 @@ How to build, test on a Deck and publish a release. If you just want to use the 
 
 The zip is made with `archiver` instead of the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (Linux/macOS only), which is equivalent because the plugin has no native backend to compile.
 
+## Personal build
+
+To run the plugin on your own devices (another Deck, or another Linux PC with Decky Loader) with your credentials already inside, use `npm run package:personal`. It bundles your gitignored `google_credentials.json` and `discord_credentials.json` into `omni-revi-transfer-vX.Y.Z-personal.zip`, so nothing has to be set up on the target. Install it with Decky's *Install Plugin from ZIP*, or `omni-revi-transfer-installer.sh install --zip <file>`. **Never publish it**: it contains your secrets. The public build (`npm run package`) never contains credentials.
+
+## Dependencies
+
+**Runtime (bundled into `dist/index.js`):**
+| Package | Why |
+|---|---|
+| [`@decky/api`](https://www.npmjs.com/package/@decky/api) | Frontend↔backend RPC (`callable`, events), plugin registration |
+| [`@decky/ui`](https://www.npmjs.com/package/@decky/ui) | Steam-styled UI components (panels, buttons, sliders, modals) |
+| [`react-icons`](https://www.npmjs.com/package/react-icons) | Icons (camera, arrows, refresh) |
+| [`qrcode-generator`](https://www.npmjs.com/package/qrcode-generator) | Fully local, dependency-free QR code rendering |
+| `tslib` | TypeScript helper runtime |
+
+**Backend:** Python standard library only (`asyncio`, `socket`, `secrets`, `shutil`, `json`, `re`, `base64`, `hashlib`, `ssl`, `urllib.request`/`urllib.parse`) plus the `decky` module Decky Loader itself provides. No pip packages are vendored.
+
+**Dev tooling:**
+| Package | Why |
+|---|---|
+| `rollup` + `@decky/rollup` | Bundles `src/index.tsx` into `dist/index.js` |
+| `typescript` | Type checking |
+| `node-ssh` | Powers `scripts/deploy.mjs`, our own SSH/SFTP deploy script (see Commands above) |
+| `archiver` | Powers `scripts/package.mjs`, builds the distributable install zip |
+
 ## Publishing a release
 
 1. Bump `version` in `package.json`, add the entry to `CHANGELOG.md`, and refresh the **Latest update** section of the README and the version in `PRIVACY.md`.
