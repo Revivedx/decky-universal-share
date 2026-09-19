@@ -1,81 +1,69 @@
 # Omni-Revi-Transfer — for Decky
 
-**What this app does:** Omni-Revi-Transfer is a plugin for the Steam Deck (installed through [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)) that lets you browse, manage, and share the screenshots your Deck already takes — right from the in-game Quick Access Menu. You can preview them, delete old ones, share one instantly to your phone with a QR code, or upload one to your own Google Drive, without ever leaving your controller.
+**What the plugin does:** Omni-Revi-Transfer is a plugin for the Steam Deck (installed through [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)) that lets you browse, manage and share the screenshots your Deck already takes, right from the in-game Quick Access Menu: send one to your phone with a QR code, to your Steam account or a Steam friend, to a Discord channel, or to your own Google Drive, without ever leaving your controller.
 
-**Version 0.0.9** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+## Latest update — v0.0.9
+
+- **Desktop Mode installer**: a `.desktop` file to install, configure your keys and uninstall the plugin with a small menu ([how](#download-and-install)).
+- **Share to Discord and Steam**: post to a Discord channel, upload to your Steam account, or open a Steam friend's chat with the screenshot ready to send, plus optional **auto-upload** with a delay you choose.
+- **Your own keys**: Google Drive and Discord use *your* app's credentials, so nothing secret ships with the plugin ([Google Drive](#setting-up-google-drive), [Discord](#setting-up-discord)).
+- **Much lighter on big libraries**: menus and auto-upload stay instant even with thousands of screenshots.
+
+Everything else, release by release, is in the [CHANGELOG](CHANGELOG.md).
+
+## What it does
+
+- **Gallery and preview**: every game's Steam screenshots (plus "SteamOS / Desktop" shots), newest first, 5 per page. Open one for a full-size preview with **Share** and **Delete**.
+- **Share** (dropdown in the preview):
+  - **QR Code**: a phone on the same Wi-Fi scans it and downloads the image (iPhone and Android alike). Nothing leaves your network.
+  - **Steam (my account)**: uploads it to your Steam account with the privacy you pick (Private by default).
+  - **Steam friend (chat)**: pick a friend (recent chats first) and their chat opens with the screenshot ready to send, like Steam's own Media → Share. You can tag it as a spoiler; **B** goes back to the friend list.
+  - **Discord**: posts it, with the game name, to a channel you choose.
+  - **Google Drive**: uploads it to `omni-revi-transfer/screenshots/<Game>` in your own Drive; re-uploading the same file is skipped.
+- **Auto-upload** (off by default): Steam, Google Drive and Discord each get a toggle and a delay slider (5-60 s, 10 by default) in **Share options**. It only covers screenshots taken while the plugin runs, never the ones you already had.
+- **Storage panel**: how much space your screenshots use, with a warning limit (0.5-50 GB or Unlimited) and alerts at 80/90/100%. An optional, off-by-default "auto-delete oldest when over the limit" exists and warns that it deletes from *any* game.
+- **Share options**: link or unlink Google Drive and Discord, choose the Steam upload privacy, and set how long a QR link stays active.
+
+## Why it works this way
+
+- **It uses Steam's own screenshots** (Steam button + R1): the plugin reads and manages what Steam already saves, and finds your Steam account and screenshot folders by itself, including multi-account setups.
+- **QR sharing is a tiny LAN-only server** written on `asyncio`, because the Python that Decky bundles has no `http.server`. It serves only the chosen file, under a random name.
+- **Discord goes to a channel, never a DM.** Discord offers no legitimate way for an app to post or DM *as you* (that would be a self-bot). The allowed route is a webhook in a channel you pick, linked through the Deck's Steam browser. For a "DM to myself", create a private server with one channel.
+- **Steam sharing runs inside Steam's own client**, since only it can upload to your account. The friend chat uses Steam's internal chat, which isn't a documented API and could change with a Steam update; if it stops working, the plugin falls back to just opening the chat.
+- **You bring your own Google / Discord app**, so there is no shared secret to leak or to be rate limited or revoked for everyone at once.
+- **The screenshot list is cached per folder**, so opening the menu and auto-upload checks stay instant even with 20,000 screenshots (measured on a Deck: ~0.6 ms per gallery refresh instead of ~358 ms).
 
 ## Download and install
 
-Everything is on the [Releases page](https://github.com/Revivedx/omni-revi-transfer/releases/latest). Choose **one** of the two ways to install it:
+Everything is on the [Releases page](https://github.com/Revivedx/omni-revi-transfer/releases/latest). Choose **one** of the two ways:
 
 | | **Installer** (`.desktop`) | **ZIP** (manual) |
 |---|---|---|
 | File to download | `Omni-Revi-Transfer-Installer.desktop` | `omni-revi-transfer-vX.Y.Z.zip` |
-| Where you do it | Desktop Mode, double-click | Game Mode: Decky → Settings → Developer → *Install Plugin from ZIP* |
+| Where | Desktop Mode, double-click | Game Mode: Decky → Settings → Developer → *Install Plugin from ZIP* |
 | Needs Decky's Developer Mode | No | Yes |
-| Updating, uninstalling | From the same menu | Install the new zip over it / remove it in Decky |
-| Entering your Google Drive / Discord keys | **Easy**: a "Configure keys" menu (it also offers it right after installing) | **Harder**: only inside the plugin with the on-screen keyboard (Share options → Set up ...), or by creating the credential files by hand |
-| Recommended | **Yes** | For people who prefer not to run a script |
+| Update / uninstall | From the same menu | Install the new zip over it / remove it in Decky |
+| Entering your Google Drive / Discord keys | **Easy**: a "Configure keys" menu, also offered right after installing | **Harder**: only inside the plugin with the on-screen keyboard, or by creating the credential files by hand |
+| Recommended | **Yes** | If you prefer not to run a script |
 
-The installer is recommended because the two services need your own app's client ID and secret, which are long strings that are tedious to type with the Deck's on-screen keyboard from inside the plugin; the installer's dialogs are much friendlier for that (and you can skip it and do it later). Both routes end with the same plugin.
+The installer is recommended because the keys are long strings that are tedious to type with the Deck's on-screen keyboard. Either way, Decky Loader must already be installed ([decky.xyz](https://decky.xyz)).
 
-### Option 1 (recommended): the installer, in Desktop Mode
+**Installer, step by step**
 
-1. Switch the Deck to **Desktop Mode** and download `Omni-Revi-Transfer-Installer.desktop` from this repo's [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or from the [`installer/`](installer/) folder).
-2. Right-click the downloaded file → **Properties → Permissions** → tick **Is executable**, then double-click it. (Files downloaded by a browser are not executable by default. If KDE asks whether to trust the launcher, choose to launch it.)
-3. A small menu opens:
-   - **Install** downloads the latest release, installs it and restarts Decky's plugin service. It asks for the Deck's password once (the same one you use for `sudo`; if you never set one, it tells you how to). Afterwards it offers to enter your **Google Drive** and **Discord** keys; you can **Skip** both and do it later.
-   - **Configure keys** appears once the plugin is installed. It saves your own Google / Discord app credentials so they are ready when you open the plugin (you can also enter them inside the plugin, under Share options). See [Setting up Google Drive](#setting-up-google-drive) and [Setting up Discord](#setting-up-discord) for how to get them.
-   - **Update / reinstall** and **Uninstall** (which can keep or delete your settings). Uninstalling cannot revoke a linked Google or Discord account, so unlink them in the plugin first (the installer reminds you).
-4. Go back to **Game Mode**: Omni-Revi-Transfer is in the Quick Access menu, under the plugins.
+1. In **Desktop Mode**, download `Omni-Revi-Transfer-Installer.desktop`.
+2. Right-click it → **Properties → Permissions** → tick **Is executable**, then double-click it. (Browsers don't download files as executable; if KDE asks whether to trust the launcher, launch it.)
+3. Pick **Install**. It asks for the Deck's password once (the one you use for `sudo`; if you never set one, it tells you how) and then offers to enter your Google Drive and Discord keys. You can skip both and do it later with **Configure keys**, which appears once the plugin is installed.
+4. Back in **Game Mode**, the plugin is in the Quick Access menu.
 
-The installer only touches `~/homebrew/{plugins,settings,data,logs}/Omni-Revi-Transfer` and restarts `plugin_loader`; it is a plain shell script (`installer/omni-revi-transfer-installer.sh`), so you can read it before running it. If a release zip sits next to the installer or in `~/Downloads`, it is used instead of downloading (handy offline). It also works from a terminal: `omni-revi-transfer-installer.sh status | install | configure | uninstall`. A log is kept in `~/.cache/omni-revi-transfer-installer.log`. Decky Loader must already be installed ([decky.xyz](https://decky.xyz)).
+The installer only touches `~/homebrew/{plugins,settings,data,logs}/Omni-Revi-Transfer` and restarts Decky's `plugin_loader`. It is a plain shell script (`installer/omni-revi-transfer-installer.sh`) you can read first, it also works from a terminal (`status | install | configure | uninstall`), and it keeps a log in `~/.cache/omni-revi-transfer-installer.log`. If a release zip sits next to it or in `~/Downloads`, it uses that instead of downloading.
 
-### Option 2: install the zip by hand
+**ZIP, step by step**: download `omni-revi-transfer-vX.Y.Z.zip`, enable **Developer Mode** in Decky's settings, then in its **Developer** tab choose **Install Plugin from ZIP**.
 
-1. Grab the latest `omni-revi-transfer-vX.Y.Z.zip` from the [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or build one yourself, see below).
-2. On the Deck (or any Linux machine running Decky Loader), open Decky's Quick Access Menu → **Settings** → enable **Developer Mode** if it isn't already.
-3. In the Decky Settings' **Developer** tab, use **Install Plugin from ZIP** and pick the file.
-4. Omni-Revi-Transfer should now show up in the plugin list.
-
-Either way, Google Drive and Discord need a one-time setup with **your own** Google / Discord app (the plugin ships no credentials of anyone's); see [Setting up Google Drive](#setting-up-google-drive) and [Setting up Discord](#setting-up-discord). QR sharing, Steam sharing, the gallery and the storage panel work without any setup.
-
-## What it does (current scope)
-
-- **Gallery**: lists Steam's native screenshots across *every* game (plus the special "SteamOS / Desktop" bucket Steam uses for shots taken outside a game), newest first, 5 per page, with Previous/Next navigation and a manual Refresh button.
-- **Preview**: tapping a screenshot opens a full-resolution preview with **Share** and **Delete** actions.
-- **Delete**: removes the screenshot file and its cached thumbnail. (Steam's own `760/screenshots.vdf` index isn't touched — Steam tolerates manually removed files and prunes the stale entry on its next scan, same as deleting the file from a file manager would.)
-- **Share via QR**: starts a local, LAN-only HTTP server that serves *only* the selected screenshot, and shows a QR code (generated 100% locally — no third-party service involved) that a phone on the same Wi-Fi can scan to download it. See [Security notes](#security-notes-for-share-via-qr) below for how this is hardened.
-- **Discord**: posts a screenshot, with the game name, to a Discord channel you pick. After the one-time [setup with your own Discord app](#setting-up-discord), link it from **Share options → Discord → Link Discord**: the Discord authorization page opens in the Deck's Steam browser (Discord's own login offers "log in with QR code" from your phone), you choose the channel, and the plugin stores the resulting webhook. Then choose **Discord** in the Share dropdown of any screenshot. Linking requires the Deck's sudo password, like Google Drive. See [Security notes for Discord](#security-notes-for-discord).
-- **Steam account and Steam friends**: the Share dropdown of any screenshot has **Steam (my account)**, which uploads it to your own Steam account (Steam Cloud) with the privacy you pick, and **Steam friend (chat)**, which does what Steam's own Media → Share → friend does: you pick a friend (recent chats first, with profile pictures) and their chat window opens with the screenshot ready to send, where you can tag it as a spoiler before confirming. Pressing **B** while the screenshot is still unsent closes that chat and takes you back to the friend picker. Nothing is uploaded to your account for this. Choose the upload privacy for your own account (Private by default) in **Share options → Steam**. See [Security notes for Steam sharing](#security-notes-for-steam-sharing).
-- **Auto-upload** *(off by default)*: **Share options** shows an "Auto-upload" toggle for Steam, and for Google Drive and Discord once they are linked. When on, every new screenshot is uploaded after a delay you choose per service with a slider (5–60 seconds, 10 by default). It only covers screenshots taken while the plugin is running, and never uploads the ones that already existed when you turned it on. Unlinking a service switches its toggle off. See [Security notes](#security-notes-for-google-drive) for what this means for privacy.
-- **iPhone/iPad users**: no iCloud integration is offered (see [why](#why-it-works-this-way-design-decisions-worth-knowing) below). Share via QR works with Apple devices: scan the code with the Camera app, open the link in Safari, and save the image to Photos.
-- **Google Drive upload** *(see [Google Drive status](#google-drive-status) below)*: uploads a screenshot to the user's own Google Drive, organized under `omni-revi-transfer/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game), with duplicate detection so re-uploading the same file is a no-op. Linking requires confirming the Deck's own sudo password first (see [Security notes for Google Drive](#security-notes-for-google-drive) below).
-- **Storage panel**: a collapsible summary showing how much space Steam's screenshots are using, with a configurable warning limit (0.5–50 GB, or Unlimited). Exceeding it only shows a warning — it never blocks Steam from saving a new screenshot (the plugin doesn't control that). Alerts fire once per threshold crossing at 80/90/100% usage. There's an opt-in, **off-by-default** "auto-delete oldest when over limit" toggle for anyone who wants that risk; its description explicitly warns that it permanently deletes screenshots from *any* game without asking (and is automatically disabled when the limit is set to Unlimited).
-- **Share options panel**: three blocks. **QR Link** sets how long a "Share via QR" link stays active before expiring on its own (1/5/10/30 minutes). **Steam** holds the upload privacy plus its Auto-upload toggle and delay slider. **Google Drive** and **Discord** are collapsible; each holds its Link/Unlink button and, once linked, its Auto-upload toggle and upload-delay slider.
-
-## Why it works this way (design decisions worth knowing)
-
-- **No custom capture, no button-combo hotkey.** Earlier iterations tried to capture screenshots ourselves (first via an L4+R4 button combo, then via `gamescopectl screenshot`). Both were abandoned:
-  - The Deck's controller doesn't expose its real button protocol via generic Linux `evdev` — Steam owns it exclusively while running (confirmed empirically: zero evdev events reach the controller when pressing the paddles).
-  - `gamescopectl screenshot` (gamescope's own debug command) did work, but Steam's native screenshot (Steam button + R1) is more reliable, doesn't capture Decky's own Quick Access Menu overlay (something our own capture couldn't cleanly avoid), and Steam already generates thumbnails for us.
-- **The plugin backend runs as the normal `deck` user, not root.** Once capture stopped being our job, nothing left in the backend needs elevated privileges — it only reads/deletes files the `deck` user already owns.
-- **The Steam account (and its screenshot folder) is auto-detected**, not configured by hand. `userdata/<accountID>/760/remote/` is located by scanning `userdata/` (single-account fast path) or by parsing `config/loginusers.vdf` for multi-account setups, converting the account's SteamID64 to its 32-bit folder name.
-- **The QR-sharing HTTP server is hand-rolled on top of `asyncio`**, not `http.server`/`socketserver`/`wsgiref`. Those modules are simply not present in the packaged Python that Decky Loader uses to run plugin backends (confirmed on-device: `ModuleNotFoundError`, even for `wsgiref.simple_server`, which itself depends on `http.server`). `socket` and `asyncio` are available, so the server implements the bare minimum HTTP GET handling needed.
-- **No iCloud sharing.** An earlier build listed "iCloud (coming soon)" in the Share menu; it was removed because it can't honestly be delivered. Apple provides no public API for third-party apps outside its own platforms to upload files into a user's iCloud Drive or Photos (unlike Google Drive's OAuth `drive.file` scope). The only official route, CloudKit Web Services, stores data in a container belonging to an app of the developer's own (so files wouldn't appear in the Files or Photos apps unless a companion iOS app existed), requires a paid Apple Developer Program membership, and uses a browser-redirect sign-in that doesn't fit a controller-driven Deck. Unofficial workarounds that log in with an Apple ID password and 2FA violate Apple's terms and would mean storing Apple credentials on the Deck, which contradicts this project's privacy stance. Share via QR already covers iPhones without any of that.
-- **Discord posts to a channel, never to a DM, and the login isn't a QR.** Discord has no device flow and no scope that lets an app post or DM *as the user* (that would be a self-bot, against Discord's terms). The one legitimate route is the `webhook.incoming` OAuth scope, which creates a webhook in a channel the user picks. So the link runs through the Deck's own browser with a `localhost` redirect, and uploads go through the webhook. For "a DM to myself", create a private server with one channel and link that.
-- **Steam sharing runs in the frontend, and the friend chat uses an undocumented API.** Uploading to a Steam account is something only Steam's own client can do, so it goes through `SteamClient.Screenshots.UploadLocalScreenshot` from the plugin's frontend, not the Python backend. For friends, an earlier build uploaded the screenshot and sent its link, which was clumsy; the plugin now reuses the mechanism behind Steam's own Media → Share → friend option instead: it opens the friend's chat window and stages the image in it (`ChatView.SetFileToUpload`), so Steam's own chat handles the upload, the spoiler tag and the confirmation. That goes through Steam's internal chat store, which is not a documented API and may change with a Steam update; every use is feature-checked, and if it stops working the plugin falls back to just opening the chat. The chat has to be opened in Steam's own registered browser context (not a DOM window); passing anything else creates a stray chat that floats over everything and never receives the controller's focus. While the screenshot waits unsent in the chat, the plugin watches the controller's B button and, only while that chat tab is open with the image still staged, closes it and reopens the friend picker.
-- **The screenshot list is cached per folder.** Walking every file is O(library size); it used to happen every 2 seconds and several times per menu open, which cost ~11% of a CPU core with 20,000 screenshots. A folder's timestamp changes when a file is added or removed, so the index re-reads only folders that changed (and distrusts timestamps younger than 3 seconds, for SD cards with coarse timestamps). Measured on a Deck: with 20,000 screenshots a gallery refresh takes ~0.6 ms instead of ~358 ms and the plugin's memory stays ~17 MB lower. Around 15 MB of the plugin's ~37 MB resident memory is the Python runtime itself, similar to other Decky plugins.
-- **Reddit is not implemented.** Since late 2025 Reddit requires manual approval (typically weeks, and it can be denied) before any new app may use its API, and it offers no device flow either. It will be revisited only if that approval is granted.
-- **Modals use `ModalRoot`, not `ConfirmModal`.** `ConfirmModal` always renders its own OK/Cancel button pair with no documented way to hide either one, and — the actual bug that took a few rounds to track down — it does **not** close itself when those buttons are pressed; the caller has to explicitly call the `.Close()` handle that `showModal()` returns. `ModalRoot` forces no buttons at all, letting the content define exactly which actions exist (Share, Delete, Stop sharing), while its `onCancel` prop is what the controller's B button fires.
-
-## Google Drive status
-
-Google Drive works with **your own Google app**: the plugin ships no Google credentials. You create a (free) OAuth client in your own Google Cloud project, enter its client ID and secret once in the plugin, and they stay on your Deck (obfuscated). Nothing is shared with anyone else, the uploads are tied to a project you control, and the plugin doesn't depend on a shared app passing Google's verification. It only requests the non-sensitive `drive.file` scope (files the plugin itself creates). You can revoke access any time from your [Google Account's connected apps](https://myaccount.google.com/permissions).
+**Need your Google Drive or Discord keys?** QR, Steam sharing, the gallery and the storage panel work without any setup. Google Drive and Discord need one you create yourself, and the guides below explain it step by step: [Setting up Google Drive](#setting-up-google-drive) (about 10 minutes) and [Setting up Discord](#setting-up-discord) (about 5).
 
 ## Setting up Google Drive
 
-One time, about 10 minutes, best done on a computer:
+One time, best done on a computer:
 
 1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create a project (any name).
 2. **APIs & Services → Library**, search for **Google Drive API** and click **Enable**.
@@ -83,19 +71,19 @@ One time, about 10 minutes, best done on a computer:
 4. **Data access → Add or remove scopes**: add only `.../auth/drive.file` and save.
 5. **Audience → Publish app** (status "In production"). Without this, Google expires the login every 7 days and only listed test users can link. `drive.file` is a non-sensitive scope, so publishing your own app for your own use needs no Google review. If Google shows an "unverified app" notice while you link, that is your own app: continue.
 6. **Clients → Create client**, type **TVs and Limited Input devices**, and copy the **Client ID** and **Client secret**.
-7. On the Deck: Quick Access Menu → Omni-Revi-Transfer → **Share options → Google Drive → Set up Google Drive**, paste both, **Save**.
+7. Enter them with the installer's **Configure keys**, or in the plugin: **Share options → Google Drive → Set up Google Drive**.
 8. **Link Google Drive** → confirm the Deck's password → scan the QR with your phone and approve.
 
-Typing a ~70-character client ID with the on-screen keyboard is tedious. Alternative: in Desktop Mode (or over SSH) create `google_credentials.json` in the plugin folder (`~/homebrew/plugins/Omni-Revi-Transfer/`) with the shape of `google_credentials.example.json`; the plugin reads it like the saved values. Values entered in the plugin take priority over that file.
+Alternative to typing the ~70-character client ID: in Desktop Mode (or over SSH) create `google_credentials.json` in the plugin folder (`~/homebrew/plugins/Omni-Revi-Transfer/`) with the shape of `google_credentials.example.json`. Values entered in the plugin take priority over that file.
 
 ## Setting up Discord
 
-One time, about 5 minutes:
+One time:
 
 1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application** (any name).
 2. **OAuth2 → Redirects → Add Redirect**: `http://localhost:47821/callback`, then **Save Changes** (without saving it isn't stored).
 3. Copy the **Application ID** (General Information) and, under OAuth2, **Reset Secret** and copy the **Client Secret**.
-4. On the Deck: **Share options → Discord → Set up Discord**, paste both, **Save**.
+4. Enter them with the installer's **Configure keys**, or in the plugin: **Share options → Discord → Set up Discord**.
 5. **Link Discord**: the authorization page opens in the Deck's Steam browser; log in (Discord's QR login works), then pick the server and channel. You need a server where you can manage webhooks; a private server of your own works as a "DM to myself" (Discord's **+ → Create My Own**).
 
 No Discord review is needed for the `webhook.incoming` scope.
@@ -107,51 +95,17 @@ For developers who want the plugin on their own devices (another Deck, or anothe
 - `npm run package` builds the **public** zip: `omni-revi-transfer-vX.Y.Z.zip`, which never contains credentials.
 - `npm run package:personal` builds `omni-revi-transfer-vX.Y.Z-personal.zip`, which bundles your gitignored `google_credentials.json` and `discord_credentials.json` so nothing needs to be set up on the target device. **Never publish this one**: it contains your secrets. It refuses to build if a credentials file is missing.
 
-## Security notes (for "Share via QR")
+## Security
 
-The local share server has no authentication or TLS, so it's hardened deliberately:
+The short version, since the usual worry is someone getting hold of your keys. More detail in [PRIVACY.md](PRIVACY.md).
 
-- The public URL uses a **high-entropy random token** as the filename, not the real Steam screenshot filename (which follows a guessable date pattern).
-- **QR codes are generated locally**, in the plugin's own frontend bundle, via the [`qrcode-generator`](https://github.com/kazuhikoarase/qrcode-generator) library — no screenshot URL, LAN IP, or any other data is ever sent to a third-party service to render the code.
-- The server **shuts down automatically after the first successful download** (with a short grace period, in case the phone's browser needs a second request to finish saving), or after the configured maximum duration if nobody downloads it.
-- Only the one chosen file is exposed (copied into an isolated staging folder), never the whole screenshots library.
-
-This does mean: while a share is active, anyone else on the same network who somehow obtained the exact URL could also download that one file — treat it like a temporary, one-time link, same as you would with any quick file-share tool on a home network.
-
-## Security notes (for Google Drive)
-
-Full details live in `PRIVACY.md`, but in short:
-
-- Only the [`drive.file`](https://developers.google.com/drive/api/guides/api-specific-auth) scope is requested — the plugin can only see/create files it uploads itself, never browse the rest of the user's Drive.
-- Linking uses Google's OAuth **device flow**: the user approves on their own phone/browser by scanning a QR code, never by typing a password into the plugin.
-- The resulting refresh token is stored **locally on the Deck only**, inside the plugin's own settings folder, and is **obfuscated at rest** (XOR'd with a key derived from the device's own `/etc/machine-id`, base64-encoded) — this is explicitly *obfuscation, not real encryption*. It raises the bar against casual/accidental exposure (e.g. someone `cat`-ing the file out of curiosity) but would not stop someone with root access to a compromised Deck from reversing it, since the process itself must be able to decrypt it with no human input. This limitation is disclosed to the user, not hidden.
-- Before starting the link flow, the plugin requires the user to re-enter **this Deck's own sudo password** (verified via `sudo -k -S -v`, never logged, piped straight to stdin so it never appears in `ps`) as a step-up confirmation — so someone who picks up an already-unlocked Deck can't silently link their own Google account to it. The risk of the obfuscated (not encrypted) token is disclosed on that same screen before the password prompt.
-- Unlinking revokes the token with Google directly and deletes the local file — equivalent to removing the app from your [Google Account's connected apps list](https://myaccount.google.com/permissions).
-- The plugin ships **no** OAuth credentials: you create your own Google app and enter its client ID/secret, which are stored only on your Deck, obfuscated at rest like the linked session (obfuscation, not real encryption; the same limits apply). Because each user has their own, nothing about anyone else's app is exposed. The gitignored `google_credentials.json` (see `google_credentials.example.json`) is only for developers and personal builds, and GitHub's push protection stops such files from ever being committed.
-
-## Security notes (for Steam sharing)
-
-- Nothing goes through any server of this project: uploads and chat messages are done by your own Steam client, to your own account.
-- The upload privacy is **Private** by default. Choosing **Public** makes every screenshot you upload to your account (including auto-uploads) visible to everyone on your profile, and the settings panel warns about it.
-- **Steam friend (chat)** doesn't upload anything to your account or send anything by itself: it opens the chat with the image staged, and you confirm sending there.
-- Uploaded screenshots count against your Steam Cloud space, and this plugin cannot delete them from Steam. Manage or remove them from your Steam profile's screenshots page.
-- The friend picker reads your Steam client's friends list (names, profile pictures and recent chats), on the Deck only.
-
-## Security notes (for auto-upload)
-
-- Off by default and opt-in per service, and only offered while that service is linked. The toggle's description says plainly that uploads happen without asking.
-- There's no filter: a screenshot that happens to show something private will be uploaded like any other, which is the trade-off of not confirming each one. The delay (5–60 seconds, 10 by default, adjustable per service) is a window to delete a screenshot (or switch the toggle off) before it goes out, since the toggles and delays are checked again continuously.
-- Steam gives plugins no "screenshot taken" event for Google Drive and Discord uploads, so new files are found by checking the screenshots folders' timestamps every couple of seconds, and only while one of those toggles is on (nothing is scanned otherwise); nothing is read or sent until the delay has passed.
-- Failed auto-uploads are not retried, and a toast reports the failure.
-
-## Security notes (for Discord)
-
-- Only the `webhook.incoming` scope is requested. It can create a webhook in the one channel you choose; it cannot read messages, servers, or your account. The access token Discord returns is discarded immediately and never stored.
-- What is stored is the **webhook URL**, obfuscated at rest the same way as the Google session (obfuscation, not real encryption). Anyone holding that URL can post to that channel, which is why linking requires the Deck's sudo password.
-- The login callback is received by a listener bound to `127.0.0.1` only (nothing on your network can reach it), protected by a random single-use `state` value, and shut down after one attempt or 5 minutes.
-- Only the screenshot you choose is uploaded, when you choose it. Messages are sent with mentions disabled, so a game name can never ping `@everyone`.
-- **Unlink Discord** deletes the webhook on Discord and the local copy. You can also remove it any time under the channel's Integrations → Webhooks.
-- Likewise the Discord application's client id/secret are your own, entered in the plugin and stored only on your Deck, obfuscated. They identify your app, not you, and each link is approved by you on Discord. `discord_credentials.json` (see `discord_credentials.example.json`) exists only for developers and personal builds.
+- **Your keys never leave your Deck.** Your Google / Discord app keys and your linked sessions are stored only in the plugin's settings folder on your Deck (private to the system). There is no server and no telemetry, and the developer receives nothing.
+- **Nothing secret ships with the plugin.** The release and this repository contain no credentials: every user creates their own app, so there is no shared secret to steal, and GitHub's push protection blocks accidental commits of one.
+- **Honest limit: obfuscated, not encrypted.** Saved keys and sessions are scrambled with a key derived from the Deck itself. That stops casual snooping (a copied or accidentally opened file), but not someone with root access to your Deck, because the plugin itself has to read them. Even then, a stolen client ID and secret alone can't reach your accounts, since access still has to be approved by you, and you can reset the secret any time in Google or Discord.
+- **Linking needs the Deck's password**, so someone who picks up your unlocked Deck can't attach their own account.
+- **Minimum access, revocable any time.** Google: only `drive.file`, meaning files the plugin creates, never the rest of your Drive. Discord: only `webhook.incoming`, meaning it can post into the one channel you pick and can't read anything. Steam sharing goes through your own Steam client. **Unlink** in the plugin revokes the token with Google or deletes the Discord webhook; you can also use your [Google connected apps](https://myaccount.google.com/permissions) or the channel's Integrations settings.
+- **Sharing safeguards.** A QR link is a random one-time address, only on your local network, serving only that file, and it closes after the download or the timeout (anyone on your Wi-Fi with that exact address could fetch it meanwhile). Auto-upload is off by default and has no filter: it uploads whatever you screenshot, and the delay is your window to delete it first. Steam uploads count against your Cloud space and the plugin can't delete them; the **Public** privacy makes them visible on your profile.
+- **The installer** is a readable shell script, asks for your password once, and only touches the plugin's folders.
 
 ## Dependencies
 
@@ -182,15 +136,14 @@ This repo's deploy path is custom (built while developing on Windows against a p
    ```json
    { "deckIP": "192.168.x.x", "deckPort": "22", "deckUser": "deck", "deckPass": "..." }
    ```
-1a. (Optional, for your own dev copy) copy `google_credentials.example.json` to `google_credentials.json` and `discord_credentials.example.json` to `discord_credentials.json` (both gitignored) and fill in your client id/secret. `npm run deploy` uploads them when present, so your Deck is already set up; `npm run deploy -- --no-credentials` deploys like a fresh public install, to test the in-plugin "Set up" flow. Placeholder values from the example files are ignored.
-1b. (Only needed to work on the Discord integration) create an application at the [Discord Developer Portal](https://discord.com/developers/applications), add the redirect `http://localhost:47821/callback` under OAuth2, and copy `discord_credentials.example.json` to `discord_credentials.json` (gitignored) with its client id/secret.
+1a. (Optional, for your own dev copy) copy `google_credentials.example.json` to `google_credentials.json` and `discord_credentials.example.json` to `discord_credentials.json` (both gitignored) and fill in your client id/secret. `npm run deploy` uploads them when present, so your Deck is already set up; `npm run deploy -- --no-credentials` deploys like a fresh public install, to test the in-plugin "Set up" flow. Placeholder values from the example files are ignored. (For Discord, create the application as in [Setting up Discord](#setting-up-discord).)
 2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
 3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
-4. `npm run package` — builds the frontend and produces the public `release/omni-revi-transfer-vX.Y.Z.zip` (no credentials inside; `npm run package:personal` makes a `-personal.zip` with yours, see [Personal build](#personal-build)), laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#option-2-install-the-zip-by-hand) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
+4. `npm run package` — builds the frontend and produces the public `release/omni-revi-transfer-vX.Y.Z.zip` (no credentials inside; `npm run package:personal` makes a `-personal.zip` with yours, see [Personal build](#personal-build)), laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Download and install](#download-and-install) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case.
 
 ## Publishing a release (maintainer notes)
 
-1. Bump `version` in `package.json` and add the entry to `CHANGELOG.md` (also update the version line at the top of this README and in `PRIVACY.md`).
+1. Bump `version` in `package.json`, add the entry to `CHANGELOG.md`, and refresh the **Latest update** section at the top of this README and the version in `PRIVACY.md`.
 2. `npm run package` builds `release/omni-revi-transfer-vX.Y.Z.zip` (public, no credentials) and copies `omni-revi-transfer-installer.sh` and `Omni-Revi-Transfer-Installer.desktop` next to it.
 3. Create a GitHub Release tagged `vX.Y.Z` and attach **those three files**: `omni-revi-transfer-vX.Y.Z.zip`, `Omni-Revi-Transfer-Installer.desktop` and `omni-revi-transfer-installer.sh`. The installer looks for an asset named `omni-revi-transfer-v*.zip` in the latest release, and the `.desktop` fetches the script from this repository's `main` branch when it isn't next to it.
 4. **Never** attach the `...-personal.zip` (`npm run package:personal`): it contains the developer's own OAuth credentials.
