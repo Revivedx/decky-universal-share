@@ -4,9 +4,22 @@
 
 **Version 0.0.9** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
-## Installing (no build tools needed)
+## Download and install
 
-### Recommended: the installer (Desktop Mode)
+Everything is on the [Releases page](https://github.com/Revivedx/omni-revi-transfer/releases/latest). Choose **one** of the two ways to install it:
+
+| | **Installer** (`.desktop`) | **ZIP** (manual) |
+|---|---|---|
+| File to download | `Omni-Revi-Transfer-Installer.desktop` | `omni-revi-transfer-vX.Y.Z.zip` |
+| Where you do it | Desktop Mode, double-click | Game Mode: Decky → Settings → Developer → *Install Plugin from ZIP* |
+| Needs Decky's Developer Mode | No | Yes |
+| Updating, uninstalling | From the same menu | Install the new zip over it / remove it in Decky |
+| Entering your Google Drive / Discord keys | **Easy**: a "Configure keys" menu (it also offers it right after installing) | **Harder**: only inside the plugin with the on-screen keyboard (Share options → Set up ...), or by creating the credential files by hand |
+| Recommended | **Yes** | For people who prefer not to run a script |
+
+The installer is recommended because the two services need your own app's client ID and secret, which are long strings that are tedious to type with the Deck's on-screen keyboard from inside the plugin; the installer's dialogs are much friendlier for that (and you can skip it and do it later). Both routes end with the same plugin.
+
+### Option 1 (recommended): the installer, in Desktop Mode
 
 1. Switch the Deck to **Desktop Mode** and download `Omni-Revi-Transfer-Installer.desktop` from this repo's [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or from the [`installer/`](installer/) folder).
 2. Right-click the downloaded file → **Properties → Permissions** → tick **Is executable**, then double-click it. (Files downloaded by a browser are not executable by default. If KDE asks whether to trust the launcher, choose to launch it.)
@@ -18,7 +31,7 @@
 
 The installer only touches `~/homebrew/{plugins,settings,data,logs}/Omni-Revi-Transfer` and restarts `plugin_loader`; it is a plain shell script (`installer/omni-revi-transfer-installer.sh`), so you can read it before running it. If a release zip sits next to the installer or in `~/Downloads`, it is used instead of downloading (handy offline). It also works from a terminal: `omni-revi-transfer-installer.sh status | install | configure | uninstall`. A log is kept in `~/.cache/omni-revi-transfer-installer.log`. Decky Loader must already be installed ([decky.xyz](https://decky.xyz)).
 
-### Alternative: install the zip by hand
+### Option 2: install the zip by hand
 
 1. Grab the latest `omni-revi-transfer-vX.Y.Z.zip` from the [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or build one yourself, see below).
 2. On the Deck (or any Linux machine running Decky Loader), open Decky's Quick Access Menu → **Settings** → enable **Developer Mode** if it isn't already.
@@ -173,7 +186,14 @@ This repo's deploy path is custom (built while developing on Windows against a p
 1b. (Only needed to work on the Discord integration) create an application at the [Discord Developer Portal](https://discord.com/developers/applications), add the redirect `http://localhost:47821/callback` under OAuth2, and copy `discord_credentials.example.json` to `discord_credentials.json` (gitignored) with its client id/secret.
 2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
 3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
-4. `npm run package` — builds the frontend and produces the public `release/omni-revi-transfer-vX.Y.Z.zip` (no credentials inside; `npm run package:personal` makes a `-personal.zip` with yours, see [Personal build](#personal-build)), laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
+4. `npm run package` — builds the frontend and produces the public `release/omni-revi-transfer-vX.Y.Z.zip` (no credentials inside; `npm run package:personal` makes a `-personal.zip` with yours, see [Personal build](#personal-build)), laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#option-2-install-the-zip-by-hand) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
+
+## Publishing a release (maintainer notes)
+
+1. Bump `version` in `package.json` and add the entry to `CHANGELOG.md` (also update the version line at the top of this README and in `PRIVACY.md`).
+2. `npm run package` builds `release/omni-revi-transfer-vX.Y.Z.zip` (public, no credentials) and copies `omni-revi-transfer-installer.sh` and `Omni-Revi-Transfer-Installer.desktop` next to it.
+3. Create a GitHub Release tagged `vX.Y.Z` and attach **those three files**: `omni-revi-transfer-vX.Y.Z.zip`, `Omni-Revi-Transfer-Installer.desktop` and `omni-revi-transfer-installer.sh`. The installer looks for an asset named `omni-revi-transfer-v*.zip` in the latest release, and the `.desktop` fetches the script from this repository's `main` branch when it isn't next to it.
+4. **Never** attach the `...-personal.zip` (`npm run package:personal`): it contains the developer's own OAuth credentials.
 
 ## Not currently used
 

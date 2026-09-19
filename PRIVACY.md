@@ -53,6 +53,10 @@ The plugin can upload a screenshot the user chooses to **their own Steam account
 
 For Steam, and for each linked service (Google Drive, Discord), the user can turn on an "Auto-upload" setting, **off by default**. While it is on, each new screenshot taken while the plugin is running is uploaded to that service after a delay the user chooses (5 to 60 seconds, 10 by default), without a per-screenshot confirmation. Screenshots that existed before the setting was turned on are never uploaded automatically. The setting can be switched off at any time, and unlinking a service switches it off. Uploads go directly from the user's Deck to the chosen service, as described in the sections above; nothing is sent to the developer.
 
+## Installer (optional)
+
+The optional Desktop Mode installer (`installer/`) is a shell script that runs on the user's own Deck. It downloads the plugin's release from GitHub (or uses a zip the user already has), asks the user for their administrator password through the system's standard prompt (never stored or sent anywhere), installs the plugin under Decky's plugins folder, and, only if the user chooses, saves the client ID and secret of their own Google / Discord app in the plugin's settings folder (obfuscated, on the Deck only). It keeps a local log at `~/.cache/omni-revi-transfer-installer.log`. It sends nothing to the developer.
+
 ## Data retention and deletion
 
 - Screenshots are retained exactly as long as the user keeps them in Steam's own screenshots folder (or, in Google Drive, in the user's own Drive) — the plugin does not impose its own retention policy beyond the user's own configured, opt-in "auto-delete when over a storage limit" setting, which is off by default.
