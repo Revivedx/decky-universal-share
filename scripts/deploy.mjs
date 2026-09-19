@@ -43,11 +43,14 @@ if (existsSync(path.join(rootDir, "py_modules"))) {
 }
 // Gitignored (see .gitignore) -- only present locally, uploaded so main.py
 // can load the Google OAuth client id/secret from next to itself on the Deck.
-if (existsSync(path.join(rootDir, "google_credentials.json"))) {
+// `--no-credentials` deploys like a public install (users enter their own credentials in the
+// plugin) and removes any copies left from earlier deploys, to exercise the "Set up" flow.
+const skipCredentials = process.argv.includes("--no-credentials");
+if (!skipCredentials && existsSync(path.join(rootDir, "google_credentials.json"))) {
   itemsToUpload.push({ local: "google_credentials.json", remote: "google_credentials.json", type: "file" });
 }
 
-if (existsSync(path.join(rootDir, "discord_credentials.json"))) {
+if (!skipCredentials && existsSync(path.join(rootDir, "discord_credentials.json"))) {
   itemsToUpload.push({ local: "discord_credentials.json", remote: "discord_credentials.json", type: "file" });
 }
 
@@ -95,6 +98,11 @@ async function main() {
       await ssh.putFile(localPath, `${remotePluginDir}/${item.remote}`);
     }
     console.log(`  ✔ ${item.local}`);
+  }
+
+  if (skipCredentials) {
+    await runSudo(ssh, deckPass, `rm -f "${remotePluginDir}/google_credentials.json" "${remotePluginDir}/discord_credentials.json"`);
+    console.log("  (--no-credentials: bundled credential files removed from the Deck)");
   }
 
   console.log("Starting plugin_loader...");

@@ -522,10 +522,10 @@ _share_server = _ShareServer()
 
 # --- Google Drive (OAuth device flow + upload) -------------------------------
 
-# Feature flag: True in releases. Set it to False (here AND in src/index.tsx,
-# and package.mjs will then leave google_credentials.json out of the zip) to
-# ship a build without Google Drive, e.g. if Google's OAuth setup has to be
-# taken down. Nothing below is removed when it's off, just gated.
+# Feature flag: True in releases. Set it to False (here AND in src/index.tsx)
+# to ship a build without Google Drive. Nothing below is removed when it's
+# off, just gated. Users supply their own OAuth client (see the credentials
+# helpers just above), so the release contains no Google secret either way.
 GOOGLE_DRIVE_ENABLED = True
 
 # Device flow ("TVs and Limited Input devices" OAuth client) is used instead
@@ -534,30 +534,65 @@ GOOGLE_DRIVE_ENABLED = True
 # better -- the user approves on their phone by scanning a QR that encodes
 # Google's verification_url_complete.
 #
-# The client ID/secret are meant to be embedded in the distributed app;
-# Google's own docs treat "installed app" / device-flow clients as public,
-# not confidential (the security boundary is user consent, not secrecy of
-# these values) -- unlike a server-side OAuth client's secret. Even so, they
-# live in `google_credentials.json` (gitignored, see .gitignore) instead of
-# hardcoded here, since this repo is public and GitHub's own push-protection
-# flags OAuth client secrets on sight -- keeping them out of git avoids that
-# entirely, with no change to how they're used at runtime. That file is
-# deployed/packaged alongside main.py like any other plugin file (see
-# scripts/deploy.mjs and scripts/package.mjs); see
-# google_credentials.example.json for the expected shape.
-GOOGLE_CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "google_credentials.json")
+# OAuth client credentials (Google and Discord).
+#
+# Each user is expected to create their OWN Google / Discord app and enter its
+# client id and secret in the plugin (Share options -> Set up ...); the
+# release therefore ships no secret at all. The values are stored obfuscated
+# in the plugin's settings folder (same limits as the linked-session files:
+# obfuscation, not encryption).
+#
+# A plain `google_credentials.json` / `discord_credentials.json` next to
+# main.py is also honoured. That is how a developer's "personal build" carries
+# its own credentials to their other devices, and how the repo's deploy script
+# runs a dev copy. Those files are gitignored (GitHub's push protection flags
+# OAuth secrets on sight); see the *.example.json files for the shape.
+# Values the user entered take priority over the bundled file.
+_BUNDLED_CREDENTIALS_DIR = os.path.dirname(os.path.abspath(__file__))
+GOOGLE_CREDENTIALS_PATH = os.path.join(_BUNDLED_CREDENTIALS_DIR, "google_credentials.json")
+GOOGLE_USER_CREDENTIALS_PATH = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "google_oauth_client.json")
 
 
-def _load_google_oauth_credentials() -> tuple:
+def _usable_credential(value) -> bool:
+    """False for empty values and for the placeholders in the *.example.json files."""
+    text = str(value or "").strip().lower()
+    return bool(text) and "your-" not in text
+
+
+def _read_oauth_client(user_path: str, bundled_path: str) -> tuple:
+    """((client_id, client_secret), source) where source is "user", "bundled" or None."""
+    user = _load_obfuscated_json(user_path)
+    if user and _usable_credential(user.get("client_id")) and _usable_credential(user.get("client_secret")):
+        return (user["client_id"], user["client_secret"]), "user"
     try:
-        with open(GOOGLE_CREDENTIALS_PATH, "r", encoding="utf-8") as f:
+        with open(bundled_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("client_id"), data.get("client_secret")
-    except (OSError, ValueError, json.JSONDecodeError):
-        return None, None
+        if _usable_credential(data.get("client_id")) and _usable_credential(data.get("client_secret")):
+            return (data["client_id"], data["client_secret"]), "bundled"
+    except (OSError, ValueError, AttributeError):
+        pass
+    return (None, None), None
 
 
-GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET = _load_google_oauth_credentials()
+def _validate_oauth_client(kind: str, client_id: str, client_secret: str) -> Optional[str]:
+    """Error code for values that can't be a real client id/secret, else None.
+    Only catches obvious mistakes (a stray space, the wrong field); the provider is the real judge."""
+    client_id, client_secret = str(client_id).strip(), str(client_secret).strip()
+    if not _usable_credential(client_id) or len(client_id) > 200 or any(c.isspace() for c in client_id):
+        return "invalid_id"
+    if kind == "google" and not client_id.endswith(".apps.googleusercontent.com"):
+        return "invalid_id"
+    if kind == "discord" and not (client_id.isdigit() and 15 <= len(client_id) <= 25):
+        return "invalid_id"
+    if not _usable_credential(client_secret) or not (8 <= len(client_secret) <= 200) or any(c.isspace() for c in client_secret):
+        return "invalid_secret"
+    return None
+
+
+def _google_client() -> tuple:
+    return _read_oauth_client(GOOGLE_USER_CREDENTIALS_PATH, GOOGLE_CREDENTIALS_PATH)[0]
+
+
 # Deliberately narrow scope: drive.file only grants access to files this app
 # itself creates, never the rest of the user's Drive. Both a privacy
 # best-practice and it keeps this app out of Google's "restricted scope"
@@ -903,11 +938,12 @@ async def _get_google_access_token() -> Optional[str]:
     intentional -- see README.md for the reasoning.
     """
     token_data = _load_google_token()
-    if token_data is None:
+    google_client_id, google_client_secret = _google_client()
+    if token_data is None or not google_client_id:
         return None
     result = await _run_blocking(_http_post_form, GOOGLE_TOKEN_URL, {
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
+        "client_id": google_client_id,
+        "client_secret": google_client_secret,
         "refresh_token": token_data["refresh_token"],
         "grant_type": "refresh_token",
     })
@@ -934,19 +970,14 @@ async def _get_google_access_token() -> Optional[str]:
 # Feature flag, mirrored in src/index.tsx (same rules as GOOGLE_DRIVE_ENABLED).
 DISCORD_ENABLED = True
 
-DISCORD_CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "discord_credentials.json")
+DISCORD_CREDENTIALS_PATH = os.path.join(_BUNDLED_CREDENTIALS_DIR, "discord_credentials.json")
+DISCORD_USER_CREDENTIALS_PATH = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "discord_oauth_client.json")
 
 
-def _load_discord_oauth_credentials() -> tuple:
-    try:
-        with open(DISCORD_CREDENTIALS_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("client_id"), data.get("client_secret")
-    except (OSError, ValueError, json.JSONDecodeError):
-        return None, None
+def _discord_client() -> tuple:
+    return _read_oauth_client(DISCORD_USER_CREDENTIALS_PATH, DISCORD_CREDENTIALS_PATH)[0]
 
 
-DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET = _load_discord_oauth_credentials()
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
 # Discord requires the redirect URI to match a registered one exactly (no
@@ -1003,9 +1034,10 @@ def _discord_exchange_code(code: str) -> Optional[dict]:
     revoking it could make Discord delete the webhook we just got.
     The response body is never logged since it contains the webhook token.
     """
+    discord_client_id, discord_client_secret = _discord_client()
     status, result = _discord_request(DISCORD_TOKEN_URL, "POST", form={
-        "client_id": DISCORD_CLIENT_ID,
-        "client_secret": DISCORD_CLIENT_SECRET,
+        "client_id": discord_client_id,
+        "client_secret": discord_client_secret,
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": DISCORD_REDIRECT_URI,
@@ -1052,7 +1084,7 @@ class _DiscordLinkServer:
         self.status = "pending"
         self._timeout_task = asyncio.get_event_loop().create_task(self._expire())
         query = urllib.parse.urlencode({
-            "client_id": DISCORD_CLIENT_ID,
+            "client_id": _discord_client()[0],
             "response_type": "code",
             "scope": "webhook.incoming",
             "redirect_uri": DISCORD_REDIRECT_URI,
@@ -1567,7 +1599,34 @@ class Plugin:
     async def google_drive_status(self) -> dict:
         if not GOOGLE_DRIVE_ENABLED:
             return {"linked": False, "enabled": False}
-        return {"linked": _load_google_token() is not None, "enabled": True}
+        _, source = _read_oauth_client(GOOGLE_USER_CREDENTIALS_PATH, GOOGLE_CREDENTIALS_PATH)
+        return {
+            "linked": _load_google_token() is not None,
+            "enabled": True,
+            "configured": source is not None,
+            "credentials_source": source,
+        }
+
+    async def set_google_credentials(self, client_id: str, client_secret: str) -> dict:
+        """Saves the user's own Google OAuth client (obfuscated, on this Deck only)."""
+        if not GOOGLE_DRIVE_ENABLED:
+            return {"ok": False, "error": "disabled"}
+        if _load_google_token() is not None:
+            # A linked session was issued to the current client; a different one couldn't refresh it.
+            return {"ok": False, "error": "linked"}
+        error = _validate_oauth_client("google", client_id, client_secret)
+        if error:
+            return {"ok": False, "error": error}
+        _save_obfuscated_json(
+            GOOGLE_USER_CREDENTIALS_PATH, {"client_id": client_id.strip(), "client_secret": client_secret.strip()}
+        )
+        return {"ok": True, "error": None}
+
+    async def clear_google_credentials(self) -> dict:
+        if _load_google_token() is not None:
+            return {"ok": False, "error": "linked"}
+        _delete_file_quietly(GOOGLE_USER_CREDENTIALS_PATH)
+        return {"ok": True, "error": None}
 
     async def verify_sudo_password(self, password: str) -> bool:
         """Checks `password` against the real Deck user password via sudo.
@@ -1585,8 +1644,11 @@ class Plugin:
         """Starts the OAuth device flow. Returns the QR/code info to show the user."""
         if not GOOGLE_DRIVE_ENABLED:
             return {"error": "disabled"}
+        google_client_id = _google_client()[0]
+        if not google_client_id:
+            return {"error": "not_configured"}
         result = await _run_blocking(_http_post_form, GOOGLE_DEVICE_CODE_URL, {
-            "client_id": GOOGLE_CLIENT_ID,
+            "client_id": google_client_id,
             "scope": GOOGLE_DRIVE_SCOPE,
         })
         if "device_code" not in result:
@@ -1618,9 +1680,12 @@ class Plugin:
             _google_device_flow_state.clear()
             return {"status": "expired"}
 
+        google_client_id, google_client_secret = _google_client()
+        if not google_client_id:
+            return {"status": "error"}
         result = await _run_blocking(_http_post_form, GOOGLE_TOKEN_URL, {
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
+            "client_id": google_client_id,
+            "client_secret": google_client_secret,
             "device_code": _google_device_flow_state["device_code"],
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         })
@@ -1662,15 +1727,37 @@ class Plugin:
     async def discord_status(self) -> dict:
         if not DISCORD_ENABLED:
             return {"linked": False, "enabled": False}
-        return {"linked": _discord_webhook_url() is not None, "enabled": True}
+        _, source = _read_oauth_client(DISCORD_USER_CREDENTIALS_PATH, DISCORD_CREDENTIALS_PATH)
+        return {
+            "linked": _discord_webhook_url() is not None,
+            "enabled": True,
+            "configured": source is not None,
+            "credentials_source": source,
+        }
+
+    async def set_discord_credentials(self, client_id: str, client_secret: str) -> dict:
+        """Saves the user's own Discord application id/secret (obfuscated, on this Deck only)."""
+        if not DISCORD_ENABLED:
+            return {"ok": False, "error": "disabled"}
+        error = _validate_oauth_client("discord", client_id, client_secret)
+        if error:
+            return {"ok": False, "error": error}
+        _save_obfuscated_json(
+            DISCORD_USER_CREDENTIALS_PATH, {"client_id": client_id.strip(), "client_secret": client_secret.strip()}
+        )
+        return {"ok": True, "error": None}
+
+    async def clear_discord_credentials(self) -> dict:
+        # An existing link keeps working without them: uploads only need the webhook address.
+        _delete_file_quietly(DISCORD_USER_CREDENTIALS_PATH)
+        return {"ok": True, "error": None}
 
     async def start_discord_link(self) -> dict:
         """Starts the loopback listener and returns the Discord authorize URL,
         which the frontend opens in the Deck's own Steam browser."""
         if not DISCORD_ENABLED:
             return {"auth_url": None, "error": "disabled"}
-        if not (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET):
-            decky.logger.warning(f"Discord: {DISCORD_CREDENTIALS_PATH} is missing or incomplete.")
+        if not all(_discord_client()):
             return {"auth_url": None, "error": "not_configured"}
         auth_url = await _discord_link_server.start()
         if auth_url is None:
@@ -1708,16 +1795,14 @@ class Plugin:
 
     async def _main(self) -> None:
         decky.logger.info("Omni-Revi-Transfer started (indexing Steam's native screenshots).")
-        if GOOGLE_DRIVE_ENABLED and not (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET):
-            decky.logger.warning(
-                f"Google Drive is enabled but {GOOGLE_CREDENTIALS_PATH} is missing or incomplete; "
-                "the Drive link flow will fail until it's restored."
-            )
-        if DISCORD_ENABLED and not (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET):
-            decky.logger.warning(
-                f"Discord is enabled but {DISCORD_CREDENTIALS_PATH} is missing or incomplete; "
-                "the Discord link flow will fail until it's restored."
-            )
+        # Not an error when nothing is set up: users enter their own credentials from Share options.
+        for name, enabled, path_pair in (
+            ("Google Drive", GOOGLE_DRIVE_ENABLED, (GOOGLE_USER_CREDENTIALS_PATH, GOOGLE_CREDENTIALS_PATH)),
+            ("Discord", DISCORD_ENABLED, (DISCORD_USER_CREDENTIALS_PATH, DISCORD_CREDENTIALS_PATH)),
+        ):
+            if enabled:
+                _, source = _read_oauth_client(*path_pair)
+                decky.logger.info(f"{name}: OAuth client {'from ' + source if source else 'not set up yet'}.")
         account_id = _detect_steam_account_id()
         if account_id is None:
             decky.logger.warning("Could not detect the Steam account under userdata/.")

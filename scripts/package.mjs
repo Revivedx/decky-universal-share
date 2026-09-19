@@ -35,44 +35,47 @@ const pluginName = pluginMeta.name;
 const version = packageMeta.version;
 
 const releaseDir = path.join(rootDir, "release");
-const zipPath = path.join(releaseDir, `omni-revi-transfer-v${version}.zip`);
+const zipPath = path.join(releaseDir, `omni-revi-transfer-v${version}${process.argv.includes("--personal") ? "-personal" : ""}.zip`);
 
 // Files that must exist for the plugin to install and run at all.
 const requiredFiles = ["dist/index.js", "package.json", "plugin.json", "main.py"];
 // Nice-to-have files Decky's own docs recommend including alongside a submission.
 const optionalFiles = ["README.md", "LICENSE"];
 
-// google_credentials.json / discord_credentials.json hold the real OAuth client
-// id/secret and are gitignored, so they never reach git. Every install needs its
-// app's client to link an account, so they ride along in the zip -- but only
-// while the matching feature flag is on (a build with a feature off must not
-// ship its secret for nothing). If a flag is on and the file is missing, the
-// zip would contain a feature that can't work, so packaging stops instead.
+// Two kinds of zip:
+//
+//   npm run package            PUBLIC (the one to publish). Ships NO credentials: every user enters
+//                              their own Google / Discord app in the plugin (Share options -> Set up),
+//                              so no secret of mine is distributed.
+//   npm run package:personal   PERSONAL BUILD. Bundles google_credentials.json and
+//                              discord_credentials.json (gitignored) so the developer's own devices
+//                              work without any setup. Named "...-personal.zip"; NEVER publish it.
+//
+// The credential files are gitignored, so they never reach git either way.
+const personal = process.argv.includes("--personal");
 const mainPySource = readFileSync(path.join(rootDir, "main.py"), "utf-8");
-function requireCredentials(file, flag) {
-  if (!existsSync(path.join(rootDir, file))) {
-    console.error(
-      `${flag} is True but ${file} is missing, so the zip would ship a feature that can't work. ` +
-        `Restore the file (see ${file.replace(".json", ".example.json")}) or set the flag to False in main.py and src/index.tsx.`
-    );
-    process.exit(1);
+const CREDENTIAL_FILES = [
+  ["google_credentials.json", "GOOGLE_DRIVE_ENABLED"],
+  ["discord_credentials.json", "DISCORD_ENABLED"],
+];
+if (personal) {
+  for (const [file, flag] of CREDENTIAL_FILES) {
+    if (!new RegExp(`${flag}\\s*=\\s*True`).test(mainPySource)) continue;
+    if (!existsSync(path.join(rootDir, file))) {
+      console.error(
+        `--personal needs ${file} but it is missing (see ${file.replace(".json", ".example.json")}). ` +
+          `Create it, or build the public zip with "npm run package".`
+      );
+      process.exit(1);
+    }
+    optionalFiles.push(file);
   }
-}
-const googleDriveEnabled = /GOOGLE_DRIVE_ENABLED\s*=\s*True/.test(mainPySource);
-if (googleDriveEnabled) {
-  requireCredentials("google_credentials.json", "GOOGLE_DRIVE_ENABLED");
-  optionalFiles.push("google_credentials.json");
+  console.log("  PERSONAL BUILD: bundling your OAuth credentials. Do NOT publish this zip.");
 } else {
-  console.log("  GOOGLE_DRIVE_ENABLED is False: google_credentials.json will NOT be bundled in this zip.");
+  console.log("  Public build: no credentials are bundled (users set up their own in the plugin).");
 }
-
-// Same rule for discord_credentials.json (DISCORD_ENABLED in main.py).
-const discordEnabled = /DISCORD_ENABLED\s*=\s*True/.test(mainPySource);
-if (discordEnabled) {
-  requireCredentials("discord_credentials.json", "DISCORD_ENABLED");
-  optionalFiles.push("discord_credentials.json");
-} else {
-  console.log("  DISCORD_ENABLED is False: discord_credentials.json will NOT be bundled in this zip.");
+if (!personal && optionalFiles.some((file) => /credentials\.json$/.test(file))) {
+  throw new Error("Refusing to build a public zip that includes a credentials file.");
 }
 
 function assertBuilt() {

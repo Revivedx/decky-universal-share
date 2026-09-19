@@ -70,6 +70,9 @@ interface ShareResult {
 
 interface GoogleDriveStatus {
   linked: boolean;
+  // Whether an OAuth client (the user's own, or one bundled in a personal build) is available to link with.
+  configured?: boolean;
+  credentials_source?: "user" | "bundled" | null;
 }
 
 interface GoogleDriveLinkStart {
@@ -78,7 +81,7 @@ interface GoogleDriveLinkStart {
   user_code?: string;
   interval: number;
   expires_in: number;
-  error: "start_failed" | null;
+  error: "start_failed" | "not_configured" | "disabled" | null;
 }
 
 interface GoogleDriveLinkPoll {
@@ -92,6 +95,13 @@ interface GoogleDriveUploadResult {
 
 interface DiscordStatus {
   linked: boolean;
+  configured?: boolean;
+  credentials_source?: "user" | "bundled" | null;
+}
+
+interface CredentialsResult {
+  ok: boolean;
+  error: "invalid_id" | "invalid_secret" | "linked" | "disabled" | null;
 }
 
 interface DiscordLinkStart {
@@ -124,6 +134,10 @@ const pollGoogleDriveLink = callable<[], GoogleDriveLinkPoll>("poll_google_drive
 const unlinkGoogleDrive = callable<[], void>("unlink_google_drive");
 const uploadScreenshotToDrive = callable<[path: string], GoogleDriveUploadResult>("upload_screenshot_to_drive");
 const getDiscordStatus = callable<[], DiscordStatus>("discord_status");
+const setGoogleCredentials = callable<[clientId: string, clientSecret: string], CredentialsResult>("set_google_credentials");
+const clearGoogleCredentials = callable<[], CredentialsResult>("clear_google_credentials");
+const setDiscordCredentials = callable<[clientId: string, clientSecret: string], CredentialsResult>("set_discord_credentials");
+const clearDiscordCredentials = callable<[], CredentialsResult>("clear_discord_credentials");
 const startDiscordLink = callable<[], DiscordLinkStart>("start_discord_link");
 const pollDiscordLink = callable<[], DiscordLinkPoll>("poll_discord_link");
 const cancelDiscordLink = callable<[], void>("cancel_discord_link");
@@ -574,6 +588,7 @@ function ShareModalContent({
 function GoogleDriveLinkModal({ onLinked, onClose }: { onLinked: () => void; onClose: () => void }) {
   const [state, setState] = useState<"starting" | "waiting" | "success" | "expired" | "error">("starting");
   const [info, setInfo] = useState<GoogleDriveLinkStart | undefined>();
+  const [startError, setStartError] = useState<GoogleDriveLinkStart["error"]>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -595,6 +610,7 @@ function GoogleDriveLinkModal({ onLinked, onClose }: { onLinked: () => void; onC
     startGoogleDriveLink().then((result) => {
       if (cancelled) return;
       if (result.error || !result.user_code) {
+        setStartError(result.error);
         setState("error");
         return;
       }
@@ -641,7 +657,13 @@ function GoogleDriveLinkModal({ onLinked, onClose }: { onLinked: () => void; onC
 
         {state === "success" && <div style={{ color: "#4caf50" }}>✓ Linked! You can close this window.</div>}
         {state === "expired" && <div>The code expired before it was approved. Try again from Share options.</div>}
-        {state === "error" && <div>Couldn't link Google Drive. Check the plugin log.</div>}
+        {state === "error" && (
+          <div>
+            {startError === "not_configured"
+              ? "Google Drive isn't set up yet. Use \"Set up Google Drive\" in Share options first."
+              : "Couldn't link Google Drive. Check that the client ID is right and the plugin log."}
+          </div>
+        )}
       </div>
     </ModalRoot>
   );
@@ -658,6 +680,99 @@ function openGoogleDriveLinkModal(onLinked: () => void) {
 // silently link their own Google account on it. The password is sent once,
 // straight to sudo's stdin on the backend, and is never logged or stored.
 const NATIVE_PASSWORD_PROPS = { type: "password" };
+
+// Each user enters the client id/secret of THEIR OWN Google / Discord app, so
+// the plugin ships no secret. Typing these with the on-screen keyboard is
+// tedious, so the modal points to the README's step-by-step guide and the
+// values are only ever needed once (they're saved on this Deck, obfuscated).
+const CREDENTIAL_ERRORS: Record<"google" | "discord", Record<string, string>> = {
+  google: {
+    invalid_id: "That doesn't look like a Google client ID. It ends in .apps.googleusercontent.com.",
+    invalid_secret: "The client secret looks too short or has spaces in it.",
+    linked: "Unlink Google Drive first; the saved session belongs to the current client.",
+    disabled: "Google Drive is turned off in this build.",
+  },
+  discord: {
+    invalid_id: "The Discord application ID is a long number (about 19 digits).",
+    invalid_secret: "The client secret looks too short or has spaces in it.",
+    linked: "",
+    disabled: "Discord is turned off in this build.",
+  },
+};
+
+function CredentialsSetupModal({
+  kind,
+  onSaved,
+  onClose,
+}: {
+  kind: "google" | "discord";
+  onSaved: () => void;
+  onClose: () => void;
+}) {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+  const isGoogle = kind === "google";
+
+  const save = async () => {
+    if (!clientId.trim() || !clientSecret.trim() || saving) return;
+    setSaving(true);
+    setError(undefined);
+    try {
+      const result = await (isGoogle ? setGoogleCredentials : setDiscordCredentials)(clientId, clientSecret);
+      if (result.ok) {
+        toaster.toast({ title: `${isGoogle ? "Google Drive" : "Discord"} is set up`, body: "Now link it from Share options." });
+        onSaved();
+        onClose();
+      } else {
+        setError(CREDENTIAL_ERRORS[kind][result.error ?? ""] || "Couldn't save those values.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalRoot onCancel={onClose} closeModal={onClose} bHideCloseIcon={false}>
+      <div style={{ minHeight: PIP_CONTENT_HEIGHT, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+        <div style={{ fontWeight: 600, marginBottom: "6px" }}>Set up {isGoogle ? "Google Drive" : "Discord"}</div>
+        <div style={{ fontSize: "0.72em", opacity: 0.8, marginBottom: "8px" }}>
+          {isGoogle
+            ? "Create your own Google app (a \"TVs and Limited Input devices\" OAuth client) and paste its client ID and secret. The README's \"Setting up Google Drive\" section lists every step."
+            : "Create your own Discord application, add the redirect http://localhost:47821/callback, and paste its application ID and client secret. The README's \"Setting up Discord\" section lists every step."}{" "}
+          They're kept on this Deck only.
+        </div>
+        <TextField
+          label={isGoogle ? "Client ID" : "Application (client) ID"}
+          bShowClearAction
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+        />
+        <TextField
+          label="Client secret"
+          bIsPassword
+          {...NATIVE_PASSWORD_PROPS}
+          value={clientSecret}
+          onChange={(e) => setClientSecret(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+          }}
+        />
+        {error && <div style={{ color: "#f44336", fontSize: "0.75em", marginTop: "6px" }}>{error}</div>}
+        <div style={{ marginTop: "8px" }}>
+          <ButtonItem layout="below" disabled={!clientId.trim() || !clientSecret.trim() || saving} onClick={save}>
+            {saving ? "Saving..." : "Save"}
+          </ButtonItem>
+        </div>
+      </div>
+    </ModalRoot>
+  );
+}
+
+function openCredentialsSetup(kind: "google" | "discord", onSaved: () => void) {
+  const modal = showModal(<CredentialsSetupModal kind={kind} onSaved={onSaved} onClose={() => modal.Close()} />);
+}
 
 function LinkConfirmModal({
   service,
@@ -1407,18 +1522,30 @@ function ShareOptionsPanel() {
   const [steamOpen, setSteamOpen] = useState(false);
   const [settings, setLocalSettings] = useState<Settings | undefined>();
   const [driveLinked, setDriveLinked] = useState<boolean | undefined>();
+  const [driveConfigured, setDriveConfigured] = useState<boolean | undefined>();
+  const [driveCredentialsSource, setDriveCredentialsSource] = useState<string | null | undefined>();
   const [unlinking, setUnlinking] = useState(false);
   const [discordLinked, setDiscordLinked] = useState<boolean | undefined>();
+  const [discordConfigured, setDiscordConfigured] = useState<boolean | undefined>();
+  const [discordCredentialsSource, setDiscordCredentialsSource] = useState<string | null | undefined>();
   const [unlinkingDiscord, setUnlinkingDiscord] = useState(false);
 
   const refreshDriveStatus = useCallback(() => {
     if (!GOOGLE_DRIVE_ENABLED) return;
-    getGoogleDriveStatus().then((s) => setDriveLinked(s.linked));
+    getGoogleDriveStatus().then((s) => {
+      setDriveLinked(s.linked);
+      setDriveConfigured(s.configured);
+      setDriveCredentialsSource(s.credentials_source);
+    });
   }, []);
 
   const refreshDiscordStatus = useCallback(() => {
     if (!DISCORD_ENABLED) return;
-    getDiscordStatus().then((s) => setDiscordLinked(s.linked));
+    getDiscordStatus().then((s) => {
+      setDiscordLinked(s.linked);
+      setDiscordConfigured(s.configured);
+      setDiscordCredentialsSource(s.credentials_source);
+    });
   }, []);
 
   useEffect(() => {
@@ -1428,6 +1555,22 @@ function ShareOptionsPanel() {
   }, [refreshDriveStatus, refreshDiscordStatus]);
 
   const update = useSettingsUpdater(settings, setLocalSettings);
+
+  const onResetGoogleCredentials = async () => {
+    const result = await clearGoogleCredentials();
+    toaster.toast(
+      result.ok
+        ? { title: "Google credentials removed", body: "Set up Google Drive again to link." }
+        : { title: "Couldn't remove them", body: "Unlink Google Drive first." }
+    );
+    refreshDriveStatus();
+  };
+
+  const onResetDiscordCredentials = async () => {
+    await clearDiscordCredentials();
+    toaster.toast({ title: "Discord credentials removed", body: "Set up Discord again to link." });
+    refreshDiscordStatus();
+  };
 
   const onUnlinkDrive = async () => {
     setUnlinking(true);
@@ -1522,11 +1665,26 @@ function ShareOptionsPanel() {
         <>
           <PanelSectionRow>
             <ButtonItem layout="below" onClick={() => setDriveOpen((o) => !o)}>
-              Google Drive{driveLinked ? " (linked)" : ""} {driveOpen ? "▲" : "▼"}
+              Google Drive{driveLinked ? " (linked)" : driveConfigured === false ? " (set up needed)" : ""} {driveOpen ? "▲" : "▼"}
             </ButtonItem>
           </PanelSectionRow>
 
-          {driveOpen && (
+          {driveOpen && driveConfigured === false && (
+            <>
+              <PanelSectionRow>
+                <ButtonItem layout="below" onClick={() => openCredentialsSetup("google", refreshDriveStatus)}>
+                  Set up Google Drive
+                </ButtonItem>
+              </PanelSectionRow>
+              <PanelSectionRow>
+                <div style={{ fontSize: "0.72em", opacity: 0.7 }}>
+                  Uses your own Google app, so nothing is shared with anyone else. The README's "Setting up Google Drive" section explains how to create it.
+                </div>
+              </PanelSectionRow>
+            </>
+          )}
+
+          {driveOpen && driveConfigured !== false && (
             <PanelSectionRow>
               {driveLinked ? (
                 <ButtonItem layout="below" disabled={unlinking} onClick={onUnlinkDrive}>
@@ -1541,6 +1699,14 @@ function ShareOptionsPanel() {
                   Link Google Drive
                 </ButtonItem>
               )}
+            </PanelSectionRow>
+          )}
+
+          {driveOpen && driveConfigured && !driveLinked && driveCredentialsSource === "user" && (
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={onResetGoogleCredentials}>
+                Reset my Google credentials
+              </ButtonItem>
             </PanelSectionRow>
           )}
 
@@ -1561,11 +1727,26 @@ function ShareOptionsPanel() {
         <>
           <PanelSectionRow>
             <ButtonItem layout="below" onClick={() => setDiscordOpen((o) => !o)}>
-              Discord{discordLinked ? " (linked)" : ""} {discordOpen ? "▲" : "▼"}
+              Discord{discordLinked ? " (linked)" : discordConfigured === false ? " (set up needed)" : ""} {discordOpen ? "▲" : "▼"}
             </ButtonItem>
           </PanelSectionRow>
 
-          {discordOpen && (
+          {discordOpen && discordConfigured === false && !discordLinked && (
+            <>
+              <PanelSectionRow>
+                <ButtonItem layout="below" onClick={() => openCredentialsSetup("discord", refreshDiscordStatus)}>
+                  Set up Discord
+                </ButtonItem>
+              </PanelSectionRow>
+              <PanelSectionRow>
+                <div style={{ fontSize: "0.72em", opacity: 0.7 }}>
+                  Uses your own Discord application. The README's "Setting up Discord" section explains how to create it.
+                </div>
+              </PanelSectionRow>
+            </>
+          )}
+
+          {discordOpen && (discordConfigured !== false || discordLinked) && (
             <PanelSectionRow>
               {discordLinked ? (
                 <ButtonItem layout="below" disabled={unlinkingDiscord} onClick={onUnlinkDiscord}>
@@ -1580,6 +1761,14 @@ function ShareOptionsPanel() {
                   Link Discord
                 </ButtonItem>
               )}
+            </PanelSectionRow>
+          )}
+
+          {discordOpen && discordConfigured && !discordLinked && discordCredentialsSource === "user" && (
+            <PanelSectionRow>
+              <ButtonItem layout="below" onClick={onResetDiscordCredentials}>
+                Reset my Discord credentials
+              </ButtonItem>
             </PanelSectionRow>
           )}
 

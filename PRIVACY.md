@@ -13,7 +13,7 @@ Omni-Revi-Transfer ("the plugin") is a [Decky Loader](https://github.com/SteamDe
 ## What the plugin accesses on the device
 
 - **Steam's own screenshot files**, already saved locally by Steam itself (Steam button + R1/RB), under the standard `userdata/<account>/760/remote/<appid>/screenshots/` path. The plugin reads this folder to build the in-app gallery, and can delete a file from it only when the user explicitly taps "Delete" on that screenshot.
-- **A local settings file** (storage-limit preference, auto-delete toggle, QR share duration, auto-upload and Steam upload preferences) stored inside the plugin's own Decky-managed settings directory on the Deck, plus, only if the user links them, an obfuscated Google session token and Discord webhook address in the same directory.
+- **A local settings file** (storage-limit preference, auto-delete toggle, QR share duration, auto-upload and Steam upload preferences) stored inside the plugin's own Decky-managed settings directory on the Deck, plus, only if the user links them, an obfuscated Google session token and Discord webhook address, and the client ID/secret of the user's own Google and Discord apps if they enter them, in the same directory.
 - Nothing outside of Steam's own screenshots folder and the plugin's own settings folder is read, written, or scanned.
 
 ## Share via QR (local network only)
@@ -30,6 +30,7 @@ Omni-Revi-Transfer optionally lets a user upload a screenshot to **their own** G
 
 - **What we access:** the plugin requests only the [`drive.file`](https://developers.google.com/drive/api/guides/api-specific-auth) OAuth scope — the narrowest scope Google Drive offers. This scope only ever grants access to files and folders that this plugin itself creates in the user's Drive (organized under a `omni-revi-transfer/screenshots/<Game Name>` folder structure it creates on first upload). The plugin cannot see, list, read, or modify any other file already in the user's Drive.
 - **What we upload:** only the specific screenshot file the user explicitly chooses to upload, at the moment they choose to upload it. Nothing is uploaded automatically or in the background unless the user turns on the optional Auto-upload setting described below.
+- **Whose Google app:** the plugin ships no Google credentials. Each user creates their own Google Cloud project and OAuth client and enters its client ID and secret in the plugin, where they are stored only on the user's Steam Deck (obfuscated). The developer's Google project is not involved and the developer receives nothing.
 - **Where the session is stored:** signing in uses Google's OAuth "device flow" (the user approves access on their own phone/browser, not by giving the plugin a password). Google then issues a long-lived refresh token, which is stored **locally on the user's own Steam Deck only** — never transmitted to the developer or to any server other than Google's own OAuth endpoints. That local file is obfuscated at rest (not left as human-readable plaintext) as a defense-in-depth measure against casual exposure, though this is disclosed to the user as obfuscation rather than strong encryption before they link their account, alongside an explicit warning about what a compromised device could mean for that saved session.
 - **Revoking access:** the user can unlink Google Drive at any time from the plugin's Share options panel. This deletes the locally stored session and revokes the token with Google directly, exactly like removing an app from your [Google Account's connected apps list](https://myaccount.google.com/permissions).
 - **No server-side component:** there is no backend server operated by the developer that ever sees, proxies, stores, or logs any user's screenshots, Google account information, or Drive contents. All communication is directly between the user's own Steam Deck and Google's own servers.
@@ -39,6 +40,7 @@ Omni-Revi-Transfer optionally lets a user upload a screenshot to **their own** G
 Omni-Revi-Transfer optionally lets a user post a screenshot to a Discord channel of their choice:
 
 - **What we access:** the plugin requests only the `webhook.incoming` OAuth scope. It lets Discord create a webhook in the one channel the user selects; it does not let the plugin read messages, servers, or any account information.
+- **Whose Discord app:** likewise, each user creates their own Discord application and enters its ID and secret in the plugin; they stay on the user's Deck only.
 - **What we store:** only the resulting webhook URL, on the user's own Steam Deck, obfuscated at rest (disclosed as obfuscation, not strong encryption, before linking). Discord's access token is discarded immediately and never stored. Nothing is sent to the developer.
 - **What we upload:** only the screenshot the user explicitly chooses to send, plus its game name as the message text, directly from the Deck to Discord.
 - **Revoking access:** "Unlink Discord" deletes the webhook on Discord and the local copy. The user can also delete the webhook at any time in the channel's Integrations settings, or remove the app under Discord's Authorized Apps.
@@ -54,7 +56,7 @@ For Steam, and for each linked service (Google Drive, Discord), the user can tur
 ## Data retention and deletion
 
 - Screenshots are retained exactly as long as the user keeps them in Steam's own screenshots folder (or, in Google Drive, in the user's own Drive) — the plugin does not impose its own retention policy beyond the user's own configured, opt-in "auto-delete when over a storage limit" setting, which is off by default.
-- Uninstalling the plugin removes its local settings and any locally stored Google session token and Discord webhook address from the Deck. It does not delete the user's Steam screenshots or anything already uploaded to their Google Drive.
+- Uninstalling the plugin removes its local settings and any locally stored Google session token, Discord webhook address and app credentials from the Deck. It does not delete the user's Steam screenshots or anything already uploaded to their Google Drive.
 
 ## Children's privacy
 

@@ -8,6 +8,7 @@
     "watch": "rollup -c -w",
     "deploy": "npm run build && node scripts/deploy.mjs",
     "package": "npm run build && node scripts/package.mjs",
+    "package:personal": "npm run build && node scripts/package.mjs --personal",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

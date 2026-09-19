@@ -10,6 +10,7 @@
 2. On the Deck (or any Linux machine running Decky Loader), open Decky's Quick Access Menu → **Settings** → enable **Developer Mode** if it isn't already.
 3. In the Decky Settings' **Developer** tab, use **Install Plugin from ZIP** and pick the file.
 4. Omni-Revi-Transfer should now show up in the plugin list — no compiling, no SSH, no Node/Python toolchain required on your end.
+5. Google Drive and Discord need a one-time setup with **your own** Google / Discord app (the plugin ships no credentials of anyone's); see [Setting up Google Drive](#setting-up-google-drive) and [Setting up Discord](#setting-up-discord). QR sharing, Steam sharing, the gallery and the storage panel work without any setup.
 
 ## What it does (current scope)
 
@@ -17,7 +18,7 @@
 - **Preview**: tapping a screenshot opens a full-resolution preview with **Share** and **Delete** actions.
 - **Delete**: removes the screenshot file and its cached thumbnail. (Steam's own `760/screenshots.vdf` index isn't touched — Steam tolerates manually removed files and prunes the stale entry on its next scan, same as deleting the file from a file manager would.)
 - **Share via QR**: starts a local, LAN-only HTTP server that serves *only* the selected screenshot, and shows a QR code (generated 100% locally — no third-party service involved) that a phone on the same Wi-Fi can scan to download it. See [Security notes](#security-notes-for-share-via-qr) below for how this is hardened.
-- **Discord**: posts a screenshot, with the game name, to a Discord channel you pick. Link it from **Share options → Link Discord**: the Discord authorization page opens in the Deck's Steam browser (Discord's own login offers "log in with QR code" from your phone), you choose the channel, and the plugin stores the resulting webhook. Then choose **Discord** in the Share dropdown of any screenshot. Linking requires the Deck's sudo password, like Google Drive. See [Security notes for Discord](#security-notes-for-discord).
+- **Discord**: posts a screenshot, with the game name, to a Discord channel you pick. After the one-time [setup with your own Discord app](#setting-up-discord), link it from **Share options → Discord → Link Discord**: the Discord authorization page opens in the Deck's Steam browser (Discord's own login offers "log in with QR code" from your phone), you choose the channel, and the plugin stores the resulting webhook. Then choose **Discord** in the Share dropdown of any screenshot. Linking requires the Deck's sudo password, like Google Drive. See [Security notes for Discord](#security-notes-for-discord).
 - **Steam account and Steam friends**: the Share dropdown of any screenshot has **Steam (my account)**, which uploads it to your own Steam account (Steam Cloud) with the privacy you pick, and **Steam friend (chat)**, which does what Steam's own Media → Share → friend does: you pick a friend (recent chats first, with profile pictures) and their chat window opens with the screenshot ready to send, where you can tag it as a spoiler before confirming. Pressing **B** while the screenshot is still unsent closes that chat and takes you back to the friend picker. Nothing is uploaded to your account for this. Choose the upload privacy for your own account (Private by default) in **Share options → Steam**. See [Security notes for Steam sharing](#security-notes-for-steam-sharing).
 - **Auto-upload** *(off by default)*: **Share options** shows an "Auto-upload" toggle for Steam, and for Google Drive and Discord once they are linked. When on, every new screenshot is uploaded after a delay you choose per service with a slider (5–60 seconds, 10 by default). It only covers screenshots taken while the plugin is running, and never uploads the ones that already existed when you turned it on. Unlinking a service switches its toggle off. See [Security notes](#security-notes-for-google-drive) for what this means for privacy.
 - **iPhone/iPad users**: no iCloud integration is offered (see [why](#why-it-works-this-way-design-decisions-worth-knowing) below). Share via QR works with Apple devices: scan the code with the Camera app, open the link in Safari, and save the image to Photos.
@@ -42,9 +43,41 @@
 
 ## Google Drive status
 
-Google Drive linking is **enabled** (`GOOGLE_DRIVE_ENABLED = True` in `main.py`, mirrored in `src/index.tsx`). The plugin's Google OAuth app is published ("In production"), so any Google account can link it, with normal-lifetime sessions and no test-user cap. It only requests the non-sensitive `drive.file` scope (files the plugin itself creates), which is why Google requires no security assessment for it.
+Google Drive works with **your own Google app**: the plugin ships no Google credentials. You create a (free) OAuth client in your own Google Cloud project, enter its client ID and secret once in the plugin, and they stay on your Deck (obfuscated). Nothing is shared with anyone else, the uploads are tied to a project you control, and the plugin doesn't depend on a shared app passing Google's verification. It only requests the non-sensitive `drive.file` scope (files the plugin itself creates). You can revoke access any time from your [Google Account's connected apps](https://myaccount.google.com/permissions).
 
-Google's separate brand verification of this homepage (app name, logo, domain ownership) is still pending: Google does not accept a `github.io` address as a domain owned by the developer. Until that changes, Google's sign-in screen may show the app as not yet brand-verified. That doesn't change what the plugin can access, and you can revoke access any time from your [Google Account's connected apps](https://myaccount.google.com/permissions).
+## Setting up Google Drive
+
+One time, about 10 minutes, best done on a computer:
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create a project (any name).
+2. **APIs & Services → Library**, search for **Google Drive API** and click **Enable**.
+3. **Google Auth Platform** (older UI: *OAuth consent screen*) → **Get started**: any app name, your email as support and contact address, audience **External**.
+4. **Data access → Add or remove scopes**: add only `.../auth/drive.file` and save.
+5. **Audience → Publish app** (status "In production"). Without this, Google expires the login every 7 days and only listed test users can link. `drive.file` is a non-sensitive scope, so publishing your own app for your own use needs no Google review. If Google shows an "unverified app" notice while you link, that is your own app: continue.
+6. **Clients → Create client**, type **TVs and Limited Input devices**, and copy the **Client ID** and **Client secret**.
+7. On the Deck: Quick Access Menu → Omni-Revi-Transfer → **Share options → Google Drive → Set up Google Drive**, paste both, **Save**.
+8. **Link Google Drive** → confirm the Deck's password → scan the QR with your phone and approve.
+
+Typing a ~70-character client ID with the on-screen keyboard is tedious. Alternative: in Desktop Mode (or over SSH) create `google_credentials.json` in the plugin folder (`~/homebrew/plugins/Omni-Revi-Transfer/`) with the shape of `google_credentials.example.json`; the plugin reads it like the saved values. Values entered in the plugin take priority over that file.
+
+## Setting up Discord
+
+One time, about 5 minutes:
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create a **New Application** (any name).
+2. **OAuth2 → Redirects → Add Redirect**: `http://localhost:47821/callback`, then **Save Changes** (without saving it isn't stored).
+3. Copy the **Application ID** (General Information) and, under OAuth2, **Reset Secret** and copy the **Client Secret**.
+4. On the Deck: **Share options → Discord → Set up Discord**, paste both, **Save**.
+5. **Link Discord**: the authorization page opens in the Deck's Steam browser; log in (Discord's QR login works), then pick the server and channel. You need a server where you can manage webhooks; a private server of your own works as a "DM to myself" (Discord's **+ → Create My Own**).
+
+No Discord review is needed for the `webhook.incoming` scope.
+
+## Personal build
+
+For developers who want the plugin on their own devices (another Deck, or another Linux PC running Decky Loader) with their credentials already inside:
+
+- `npm run package` builds the **public** zip: `omni-revi-transfer-vX.Y.Z.zip`, which never contains credentials.
+- `npm run package:personal` builds `omni-revi-transfer-vX.Y.Z-personal.zip`, which bundles your gitignored `google_credentials.json` and `discord_credentials.json` so nothing needs to be set up on the target device. **Never publish this one**: it contains your secrets. It refuses to build if a credentials file is missing.
 
 ## Security notes (for "Share via QR")
 
@@ -66,7 +99,7 @@ Full details live in `PRIVACY.md`, but in short:
 - The resulting refresh token is stored **locally on the Deck only**, inside the plugin's own settings folder, and is **obfuscated at rest** (XOR'd with a key derived from the device's own `/etc/machine-id`, base64-encoded) — this is explicitly *obfuscation, not real encryption*. It raises the bar against casual/accidental exposure (e.g. someone `cat`-ing the file out of curiosity) but would not stop someone with root access to a compromised Deck from reversing it, since the process itself must be able to decrypt it with no human input. This limitation is disclosed to the user, not hidden.
 - Before starting the link flow, the plugin requires the user to re-enter **this Deck's own sudo password** (verified via `sudo -k -S -v`, never logged, piped straight to stdin so it never appears in `ps`) as a step-up confirmation — so someone who picks up an already-unlocked Deck can't silently link their own Google account to it. The risk of the obfuscated (not encrypted) token is disclosed on that same screen before the password prompt.
 - Unlinking revokes the token with Google directly and deletes the local file — equivalent to removing the app from your [Google Account's connected apps list](https://myaccount.google.com/permissions).
-- The OAuth client ID/secret are not committed to this repo (see `google_credentials.example.json` for the expected shape) — GitHub's own secret scanning flags OAuth client secrets in public repos, so they're loaded at runtime from a gitignored `google_credentials.json` instead. Every install needs that client to link an account, so **the release zip does include it**. It only identifies this app (Google treats the secret of a limited-input-device client as non-confidential), it grants no access to anyone's account, and each user still approves access individually. If it ever needs rotating, a new release zip is required.
+- The plugin ships **no** OAuth credentials: you create your own Google app and enter its client ID/secret, which are stored only on your Deck, obfuscated at rest like the linked session (obfuscation, not real encryption; the same limits apply). Because each user has their own, nothing about anyone else's app is exposed. The gitignored `google_credentials.json` (see `google_credentials.example.json`) is only for developers and personal builds, and GitHub's push protection stops such files from ever being committed.
 
 ## Security notes (for Steam sharing)
 
@@ -90,7 +123,7 @@ Full details live in `PRIVACY.md`, but in short:
 - The login callback is received by a listener bound to `127.0.0.1` only (nothing on your network can reach it), protected by a random single-use `state` value, and shut down after one attempt or 5 minutes.
 - Only the screenshot you choose is uploaded, when you choose it. Messages are sent with mentions disabled, so a game name can never ping `@everyone`.
 - **Unlink Discord** deletes the webhook on Discord and the local copy. You can also remove it any time under the channel's Integrations → Webhooks.
-- The Discord application's client id/secret live in a gitignored `discord_credentials.json` (see `discord_credentials.example.json`), like the Google ones, and ship inside the release zip (only while `DISCORD_ENABLED` is `True`). They identify the app, not any user, and each link is approved by the user on Discord.
+- Likewise the Discord application's client id/secret are your own, entered in the plugin and stored only on your Deck, obfuscated. They identify your app, not you, and each link is approved by you on Discord. `discord_credentials.json` (see `discord_credentials.example.json`) exists only for developers and personal builds.
 
 ## Dependencies
 
@@ -121,11 +154,11 @@ This repo's deploy path is custom (built while developing on Windows against a p
    ```json
    { "deckIP": "192.168.x.x", "deckPort": "22", "deckUser": "deck", "deckPass": "..." }
    ```
-1a. Copy `google_credentials.example.json` to `google_credentials.json` (gitignored) and fill in a real OAuth client id/secret; do the same with `discord_credentials.example.json` → `discord_credentials.json`. `npm run deploy` uploads them and `npm run package` bundles them, and packaging refuses to run if a feature is enabled but its file is missing. Without a file, linking that service just reports that it isn't configured.
+1a. (Optional, for your own dev copy) copy `google_credentials.example.json` to `google_credentials.json` and `discord_credentials.example.json` to `discord_credentials.json` (both gitignored) and fill in your client id/secret. `npm run deploy` uploads them when present, so your Deck is already set up; `npm run deploy -- --no-credentials` deploys like a fresh public install, to test the in-plugin "Set up" flow. Placeholder values from the example files are ignored.
 1b. (Only needed to work on the Discord integration) create an application at the [Discord Developer Portal](https://discord.com/developers/applications), add the redirect `http://localhost:47821/callback` under OAuth2, and copy `discord_credentials.example.json` to `discord_credentials.json` (gitignored) with its client id/secret.
 2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
 3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
-4. `npm run package` — builds the frontend and produces `release/omni-revi-transfer-vX.Y.Z.zip`, laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
+4. `npm run package` — builds the frontend and produces the public `release/omni-revi-transfer-vX.Y.Z.zip` (no credentials inside; `npm run package:personal` makes a `-personal.zip` with yours, see [Personal build](#personal-build)), laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Installing](#installing-no-build-tools-needed) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case. Verified end-to-end on a real Deck: extracting the zip the same way Decky's installer would and starting `plugin_loader` loads the plugin cleanly.
 
 ## Not currently used
 
