@@ -2,15 +2,30 @@
 
 **What this app does:** Omni-Revi-Transfer is a plugin for the Steam Deck (installed through [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader)) that lets you browse, manage, and share the screenshots your Deck already takes — right from the in-game Quick Access Menu. You can preview them, delete old ones, share one instantly to your phone with a QR code, or upload one to your own Google Drive, without ever leaving your controller.
 
-**Version 0.0.8** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
+**Version 0.0.9** — see [CHANGELOG.md](CHANGELOG.md) for what changed in each release.
 
 ## Installing (no build tools needed)
 
-1. Grab the latest `omni-revi-transfer-vX.Y.Z.zip` from this repo's [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or build one yourself, see below).
+### Recommended: the installer (Desktop Mode)
+
+1. Switch the Deck to **Desktop Mode** and download `Omni-Revi-Transfer-Installer.desktop` from this repo's [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or from the [`installer/`](installer/) folder).
+2. Right-click the downloaded file → **Properties → Permissions** → tick **Is executable**, then double-click it. (Files downloaded by a browser are not executable by default. If KDE asks whether to trust the launcher, choose to launch it.)
+3. A small menu opens:
+   - **Install** downloads the latest release, installs it and restarts Decky's plugin service. It asks for the Deck's password once (the same one you use for `sudo`; if you never set one, it tells you how to). Afterwards it offers to enter your **Google Drive** and **Discord** keys; you can **Skip** both and do it later.
+   - **Configure keys** appears once the plugin is installed. It saves your own Google / Discord app credentials so they are ready when you open the plugin (you can also enter them inside the plugin, under Share options). See [Setting up Google Drive](#setting-up-google-drive) and [Setting up Discord](#setting-up-discord) for how to get them.
+   - **Update / reinstall** and **Uninstall** (which can keep or delete your settings). Uninstalling cannot revoke a linked Google or Discord account, so unlink them in the plugin first (the installer reminds you).
+4. Go back to **Game Mode**: Omni-Revi-Transfer is in the Quick Access menu, under the plugins.
+
+The installer only touches `~/homebrew/{plugins,settings,data,logs}/Omni-Revi-Transfer` and restarts `plugin_loader`; it is a plain shell script (`installer/omni-revi-transfer-installer.sh`), so you can read it before running it. If a release zip sits next to the installer or in `~/Downloads`, it is used instead of downloading (handy offline). It also works from a terminal: `omni-revi-transfer-installer.sh status | install | configure | uninstall`. A log is kept in `~/.cache/omni-revi-transfer-installer.log`. Decky Loader must already be installed ([decky.xyz](https://decky.xyz)).
+
+### Alternative: install the zip by hand
+
+1. Grab the latest `omni-revi-transfer-vX.Y.Z.zip` from the [Releases](https://github.com/Revivedx/omni-revi-transfer/releases) page (or build one yourself, see below).
 2. On the Deck (or any Linux machine running Decky Loader), open Decky's Quick Access Menu → **Settings** → enable **Developer Mode** if it isn't already.
 3. In the Decky Settings' **Developer** tab, use **Install Plugin from ZIP** and pick the file.
-4. Omni-Revi-Transfer should now show up in the plugin list — no compiling, no SSH, no Node/Python toolchain required on your end.
-5. Google Drive and Discord need a one-time setup with **your own** Google / Discord app (the plugin ships no credentials of anyone's); see [Setting up Google Drive](#setting-up-google-drive) and [Setting up Discord](#setting-up-discord). QR sharing, Steam sharing, the gallery and the storage panel work without any setup.
+4. Omni-Revi-Transfer should now show up in the plugin list.
+
+Either way, Google Drive and Discord need a one-time setup with **your own** Google / Discord app (the plugin ships no credentials of anyone's); see [Setting up Google Drive](#setting-up-google-drive) and [Setting up Discord](#setting-up-discord). QR sharing, Steam sharing, the gallery and the storage panel work without any setup.
 
 ## What it does (current scope)
 

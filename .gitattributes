@@ -1,0 +1,3 @@
+# The installer runs on Linux: keep LF line endings (and the executable bit) whatever the checkout OS.
+installer/*.sh eol=lf
+installer/*.desktop eol=lf

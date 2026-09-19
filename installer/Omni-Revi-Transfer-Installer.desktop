@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Omni-Revi-Transfer Installer
+Comment=Install, configure or remove the Omni-Revi-Transfer plugin for Decky Loader
+Exec=bash -c 'f="${1#file://}"; d="$(dirname "$(readlink -f "$f" 2>/dev/null)")"; if [ -f "$d/omni-revi-transfer-installer.sh" ]; then exec bash "$d/omni-revi-transfer-installer.sh"; fi; t="$(mktemp)" && curl -fsSL https://raw.githubusercontent.com/Revivedx/omni-revi-transfer/main/installer/omni-revi-transfer-installer.sh -o "$t" && exec bash "$t"; kdialog --error "Could not download the installer script. Check your internet connection, or put omni-revi-transfer-installer.sh next to this launcher." 2>/dev/null' _ %k
+Icon=system-software-install
+Terminal=false
+Categories=Utility;

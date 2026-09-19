@@ -2,9 +2,12 @@
 
 All notable changes to Omni-Revi-Transfer are documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.0.8] - 2026-09-18
+## [0.0.9] - 2026-09-18
+
+> Version 0.0.8 was an internal test version that was never published; everything it contained is included here.
 
 ### Added
+- **Desktop Mode installer** (`installer/`): a `.desktop` launcher plus a shell script with a small menu: **Install / Update**, **Configure keys** (only offered once installed), and **Uninstall**. It downloads the latest release (or uses a zip next to it / in Downloads), asks for the Deck's password once, restarts Decky's plugin service, and optionally saves the user's own Google Drive / Discord keys in the plugin's own obfuscated format. Also usable from a terminal (`status`, `install`, `configure`, `uninstall`). `npm run package` copies the installer files into `release/` for publishing.
 - **Discord sharing**: link a Discord channel from Share options (OAuth `webhook.incoming`, completed in the Deck's Steam browser through a `localhost` callback) and post screenshots to it from the Share dropdown. Includes the same sudo-password confirmation as Google Drive, obfuscated storage of the webhook, single-use `state` protection, mentions disabled on posts, and webhook deletion on unlink. Posts to a channel only; Discord offers no legitimate way to DM as the user.
 - **Steam sharing**: "Steam (my account)" uploads a screenshot to the user's Steam account with a chosen privacy (Private by default, or Friends only / Unlisted / Public), and "Steam friend (chat)" picks a friend from a searchable list (recent chats first, with profile pictures) and opens their chat with the screenshot staged, the same way Steam's own Media → Share → friend does, so the spoiler tag and confirmation happen in Steam's chat. Pressing B while the screenshot is unsent closes the chat and returns to the friend picker. It uses Steam's internal chat store (undocumented, so feature-checked, falling back to just opening the chat). New **Share options → Steam** block for the account upload privacy.
 - **Auto-upload** toggles in Share options for Steam, Google Drive and Discord (Drive and Discord shown only while linked, all off by default; Steam is triggered by Steam's own screenshot notification instead of folder polling): new screenshots are uploaded after a per-service delay chosen with a slider (5–60 seconds, 10 by default), with a toast reporting the result. Existing screenshots are never uploaded, toggles are re-checked at upload time, and unlinking a service switches its toggle off.
@@ -33,7 +36,7 @@ All notable changes to Omni-Revi-Transfer are documented in this file. Format lo
 ## [0.0.5a] - 2026-09-18
 
 ### Added
-- Google Drive upload from the screenshot preview's Share menu, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game) at the time of this release — see [0.0.8](#008---2026-09-18) above for the later folder-path rename, with duplicate-upload detection.
+- Google Drive upload from the screenshot preview's Share menu, organized under `decky-universal-share/screenshots/<Game Name>` (or `SteamOS` for shots taken outside a game) at the time of this release — see [0.0.9](#009---2026-09-18) above for the later folder-path rename, with duplicate-upload detection.
 - Google OAuth device-flow linking (scan a QR, approve on your phone) with a step-up sudo-password confirmation gate before a link can start, and an explicit on-screen disclosure of what a compromised Deck could mean for the saved session.
 - At-rest obfuscation (not full encryption, disclosed as such) for the locally stored Google session token.
 - "Unlimited" option for the storage warning limit, alongside the existing 0.5–50 GB range.

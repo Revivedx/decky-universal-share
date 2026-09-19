@@ -986,7 +986,7 @@ DISCORD_REDIRECT_PORT = 47821
 DISCORD_REDIRECT_URI = f"http://localhost:{DISCORD_REDIRECT_PORT}/callback"
 DISCORD_LINK_TIMEOUT_SECONDS = 300
 # Discord's edge rejects urllib's default User-Agent, so a descriptive one is required.
-DISCORD_USER_AGENT = "DiscordBot (https://github.com/Revivedx/omni-revi-transfer, 0.0.8)"
+DISCORD_USER_AGENT = "DiscordBot (https://github.com/Revivedx/omni-revi-transfer, 0.0.9)"
 DISCORD_WEBHOOK_URL_PREFIXES = (
     "https://discord.com/api/webhooks/",
     "https://discordapp.com/api/webhooks/",

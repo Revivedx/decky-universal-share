@@ -15,7 +15,7 @@
 //       README.md
 //       LICENSE
 
-import { createWriteStream, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 // archiver v8 is pure ESM and dropped the old `archiver('zip', opts)`
@@ -114,6 +114,14 @@ async function main() {
 
   await archive.finalize();
   await done;
+
+  // The Desktop Mode installer is published next to the public zip (never with the personal build).
+  if (!personal) {
+    for (const file of ["omni-revi-transfer-installer.sh", "Omni-Revi-Transfer-Installer.desktop"]) {
+      copyFileSync(path.join(rootDir, "installer", file), path.join(releaseDir, file));
+    }
+    console.log("Copied the installer (.desktop + .sh) into release/ to publish alongside the zip.");
+  }
 
   console.log(`Packaged ${pluginName} v${version} -> ${path.relative(rootDir, zipPath)}`);
   console.log(`(${archive.pointer()} bytes)`);
