@@ -125,35 +125,9 @@ The short version, since the usual worry is someone getting hold of your keys. M
 |---|---|
 | `rollup` + `@decky/rollup` | Bundles `src/index.tsx` into `dist/index.js` |
 | `typescript` | Type checking |
-| `node-ssh` | Powers `scripts/deploy.mjs`, our own SSH/SFTP deploy script (see below) |
+| `node-ssh` | Powers `scripts/deploy.mjs`, our own SSH/SFTP deploy script (see [DEVELOPMENT.md](DEVELOPMENT.md)) |
 | `archiver` | Powers `scripts/package.mjs`, builds the distributable install zip |
 
-## Development workflow
+## Development
 
-This repo's deploy path is custom (built while developing on Windows against a physical Deck over SSH), not the template's original VSCode-task-based flow:
-
-1. Copy your Deck's connection info into a root-level `settings.json` (gitignored):
-   ```json
-   { "deckIP": "192.168.x.x", "deckPort": "22", "deckUser": "deck", "deckPass": "..." }
-   ```
-1a. (Optional, for your own dev copy) copy `google_credentials.example.json` to `google_credentials.json` and `discord_credentials.example.json` to `discord_credentials.json` (both gitignored) and fill in your client id/secret. `npm run deploy` uploads them when present, so your Deck is already set up; `npm run deploy -- --no-credentials` deploys like a fresh public install, to test the in-plugin "Set up" flow. Placeholder values from the example files are ignored. (For Discord, create the application as in [Setting up Discord](#setting-up-discord).)
-2. `npm run deploy` — builds the frontend, stops `plugin_loader` on the Deck, uploads the plugin over SFTP, and restarts the service. (Stopping the service before uploading avoids a hot-reload race that could otherwise leave an orphaned, runaway plugin process — see the comments in `scripts/deploy.mjs`.)
-3. `npm run build` / `npm run watch` still work standalone if you just want to compile without deploying.
-4. `npm run package` — builds the frontend and produces the public `release/omni-revi-transfer-vX.Y.Z.zip` (no credentials inside; `npm run package:personal` makes a `-personal.zip` with yours, see [Personal build](#personal-build)), laid out exactly the way Decky Loader expects for a manual "Install Plugin from ZIP" (see [Download and install](#download-and-install) above). This doesn't need the official [decky CLI](https://github.com/SteamDeckHomebrew/cli) (which is Linux/macOS-only) — since this plugin has no native backend to cross-compile, zipping the already-built files ourselves (via the `archiver` package) is equivalent for our case.
-
-## Publishing a release (maintainer notes)
-
-1. Bump `version` in `package.json`, add the entry to `CHANGELOG.md`, and refresh the **Latest update** section at the top of this README and the version in `PRIVACY.md`.
-2. `npm run package` builds `release/omni-revi-transfer-vX.Y.Z.zip` (public, no credentials) and copies `omni-revi-transfer-installer.sh` and `Omni-Revi-Transfer-Installer.desktop` next to it.
-3. Create a GitHub Release tagged `vX.Y.Z` and attach **those three files**: `omni-revi-transfer-vX.Y.Z.zip`, `Omni-Revi-Transfer-Installer.desktop` and `omni-revi-transfer-installer.sh`. The installer looks for an asset named `omni-revi-transfer-v*.zip` in the latest release, and the `.desktop` fetches the script from this repository's `main` branch when it isn't next to it.
-4. **Never** attach the `...-personal.zip` (`npm run package:personal`): it contains the developer's own OAuth credentials.
-
-## Not currently used
-
-These files are part of the original [decky-plugin-template](https://github.com/SteamDeckHomebrew/decky-plugin-template) this project was bootstrapped from, and are left in place but **not used** by this plugin:
-
-- `backend/` (`Dockerfile`, `Makefile`, `entrypoint.sh`, `src/main.c`) — scaffold for an optional native (C) backend. This plugin is pure Python + TypeScript.
-- `assets/logo.png` — not referenced anywhere in `src/`.
-- `.vscode/build.sh`, `config.sh`, `setup.sh`, `tasks.json`, `defsettings.json` — the template's original VSCode-task-based build/deploy flow (Linux-only CLI tooling, a different `settings.json` shape). Fully superseded by `npm run deploy` above.
-- `defaults/defaults.txt` — template documentation for an optional folder of default config/theme files to ship; this plugin doesn't have any.
-- `py_modules/.keep` — placeholder; no vendored Python dependencies are used.
+Building from source, deploying to a Deck and publishing a release are covered in [DEVELOPMENT.md](DEVELOPMENT.md).
