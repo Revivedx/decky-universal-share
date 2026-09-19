@@ -364,14 +364,11 @@ async function shareToSteamFriend(item: ScreenshotItem, friend: SteamFriend, onC
 
 const PAGE_SIZE = 5;
 
-// Feature flag: mirrors GOOGLE_DRIVE_ENABLED in main.py. Enabled on the
-// `test` branch; keep it false on `main` until Google's OAuth verification
-// (see PRIVACY.md) is approved, so public releases don't ship Drive linking
-// (and its "unverified app" warning) early. Both flags must match.
+// Feature flag: mirrors GOOGLE_DRIVE_ENABLED in main.py (true in releases).
+// Both flags must match; set both to false to ship a build without Drive.
 const GOOGLE_DRIVE_ENABLED = true;
 
-// Same idea for Discord (mirrors DISCORD_ENABLED in main.py): on for `test`,
-// off for `main` until the feature ships in a release.
+// Same idea for Discord (mirrors DISCORD_ENABLED in main.py).
 const DISCORD_ENABLED = true;
 
 // Generated 100% locally (no calls to any external service) so nobody's

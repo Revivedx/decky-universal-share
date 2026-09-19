@@ -5,7 +5,7 @@
 // Layout matches what Decky Loader expects (see README.md's "Distribution"
 // section, and https://wiki.deckbrew.xyz for the authoritative reference):
 //
-//   omni-revi-transfer-v0.0.5a.zip
+//   omni-revi-transfer-vX.Y.Z.zip
 //     Omni-Revi-Transfer/
 //       dist/
 //         index.js
@@ -42,16 +42,25 @@ const requiredFiles = ["dist/index.js", "package.json", "plugin.json", "main.py"
 // Nice-to-have files Decky's own docs recommend including alongside a submission.
 const optionalFiles = ["README.md", "LICENSE"];
 
-// google_credentials.json holds the real Google OAuth client id/secret and is
-// gitignored -- it must NOT ride along in a public release zip while the
-// Google Drive feature is disabled (GOOGLE_DRIVE_ENABLED = False in main.py):
-// that would leak the secret via the distributed artifact even though it's
-// kept out of git. Only bundle it once the feature is actually turned back
-// on, at which point every user's install legitimately needs it (this is a
-// single shared "installed app" OAuth client, not a per-user secret).
+// google_credentials.json / discord_credentials.json hold the real OAuth client
+// id/secret and are gitignored, so they never reach git. Every install needs its
+// app's client to link an account, so they ride along in the zip -- but only
+// while the matching feature flag is on (a build with a feature off must not
+// ship its secret for nothing). If a flag is on and the file is missing, the
+// zip would contain a feature that can't work, so packaging stops instead.
 const mainPySource = readFileSync(path.join(rootDir, "main.py"), "utf-8");
+function requireCredentials(file, flag) {
+  if (!existsSync(path.join(rootDir, file))) {
+    console.error(
+      `${flag} is True but ${file} is missing, so the zip would ship a feature that can't work. ` +
+        `Restore the file (see ${file.replace(".json", ".example.json")}) or set the flag to False in main.py and src/index.tsx.`
+    );
+    process.exit(1);
+  }
+}
 const googleDriveEnabled = /GOOGLE_DRIVE_ENABLED\s*=\s*True/.test(mainPySource);
 if (googleDriveEnabled) {
+  requireCredentials("google_credentials.json", "GOOGLE_DRIVE_ENABLED");
   optionalFiles.push("google_credentials.json");
 } else {
   console.log("  GOOGLE_DRIVE_ENABLED is False: google_credentials.json will NOT be bundled in this zip.");
@@ -60,6 +69,7 @@ if (googleDriveEnabled) {
 // Same rule for discord_credentials.json (DISCORD_ENABLED in main.py).
 const discordEnabled = /DISCORD_ENABLED\s*=\s*True/.test(mainPySource);
 if (discordEnabled) {
+  requireCredentials("discord_credentials.json", "DISCORD_ENABLED");
   optionalFiles.push("discord_credentials.json");
 } else {
   console.log("  DISCORD_ENABLED is False: discord_credentials.json will NOT be bundled in this zip.");

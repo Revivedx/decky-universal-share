@@ -522,11 +522,10 @@ _share_server = _ShareServer()
 
 # --- Google Drive (OAuth device flow + upload) -------------------------------
 
-# Feature flag: enabled on the `test` branch; keep it False on `main` until
-# Google's OAuth verification (see PRIVACY.md) is approved, so public
-# releases don't ship Drive linking (and its "unverified app" warning)
-# early. Nothing below this flag is removed -- it's fully implemented and
-# tested, just gated. The frontend mirrors this flag in src/index.tsx.
+# Feature flag: True in releases. Set it to False (here AND in src/index.tsx,
+# and package.mjs will then leave google_credentials.json out of the zip) to
+# ship a build without Google Drive, e.g. if Google's OAuth setup has to be
+# taken down. Nothing below is removed when it's off, just gated.
 GOOGLE_DRIVE_ENABLED = True
 
 # Device flow ("TVs and Limited Input devices" OAuth client) is used instead
@@ -932,7 +931,7 @@ async def _get_google_access_token() -> Optional[str]:
 # browser: the authorize URL redirects to http://localhost:<port>/callback,
 # which is served by a short-lived listener bound to 127.0.0.1 only.
 
-# Feature flag, mirrored in src/index.tsx. Enabled on `test`, off on `main`.
+# Feature flag, mirrored in src/index.tsx (same rules as GOOGLE_DRIVE_ENABLED).
 DISCORD_ENABLED = True
 
 DISCORD_CREDENTIALS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "discord_credentials.json")

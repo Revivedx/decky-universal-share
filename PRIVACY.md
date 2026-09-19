@@ -2,20 +2,18 @@
 
 **Last updated:** 2026-09-18 (plugin version 0.0.8)
 
-Omni-Revi-Transfer ("the plugin") is a [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck. It runs entirely on the user's own device. This document explains what data the plugin touches, how the optional Google Drive feature works, and how to contact us.
-
-**Note:** as of version 0.0.5b, the Google Drive feature described below is implemented but temporarily disabled in the shipped plugin while its Google OAuth app goes through Google's verification process. This policy describes how it behaves once enabled.
+Omni-Revi-Transfer ("the plugin") is a [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin for the Steam Deck. It runs entirely on the user's own device. This document explains what data the plugin touches, how the optional Google Drive, Discord and Steam features work, and how to contact us.
 
 ## Summary
 
 - The plugin does **not** operate any server of its own, does **not** collect analytics or telemetry, and does **not** send any data to the developer.
-- All data the plugin handles (screenshots, settings) stays on the user's Steam Deck, except when the user explicitly chooses to share a screenshot (via the local QR feature, or the optional Google Drive integration described below).
+- All data the plugin handles (screenshots, settings) stays on the user's Steam Deck, except when the user explicitly chooses to share a screenshot (via the local QR feature, or the optional Google Drive, Discord or Steam integrations described below) or turns on the optional automatic upload.
 - The developer has no access to, and never receives a copy of, any user's screenshots, Google account, or Google Drive contents.
 
 ## What the plugin accesses on the device
 
 - **Steam's own screenshot files**, already saved locally by Steam itself (Steam button + R1/RB), under the standard `userdata/<account>/760/remote/<appid>/screenshots/` path. The plugin reads this folder to build the in-app gallery, and can delete a file from it only when the user explicitly taps "Delete" on that screenshot.
-- **A local settings file** (storage-limit preference, auto-delete toggle, QR share duration) stored inside the plugin's own Decky-managed settings directory on the Deck.
+- **A local settings file** (storage-limit preference, auto-delete toggle, QR share duration, auto-upload and Steam upload preferences) stored inside the plugin's own Decky-managed settings directory on the Deck, plus, only if the user links them, an obfuscated Google session token and Discord webhook address in the same directory.
 - Nothing outside of Steam's own screenshots folder and the plugin's own settings folder is read, written, or scanned.
 
 ## Share via QR (local network only)
@@ -56,7 +54,7 @@ For Steam, and for each linked service (Google Drive, Discord), the user can tur
 ## Data retention and deletion
 
 - Screenshots are retained exactly as long as the user keeps them in Steam's own screenshots folder (or, in Google Drive, in the user's own Drive) — the plugin does not impose its own retention policy beyond the user's own configured, opt-in "auto-delete when over a storage limit" setting, which is off by default.
-- Uninstalling the plugin removes its local settings and any locally stored Google session token from the Deck. It does not delete the user's Steam screenshots or anything already uploaded to their Google Drive.
+- Uninstalling the plugin removes its local settings and any locally stored Google session token and Discord webhook address from the Deck. It does not delete the user's Steam screenshots or anything already uploaded to their Google Drive.
 
 ## Children's privacy
 
